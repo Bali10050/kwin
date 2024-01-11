@@ -18,9 +18,11 @@
 #include "scene/decorationitem.h"
 #include "scene/surfaceitem.h"
 #include "scene/windowitem.h"
+#include "wayland/backgroundeffect_v1.h"
 #include "wayland/display.h"
 #include "wayland/kde_blur.h"
 #include "wayland/surface.h"
+#include "wayland_server.h"
 
 #if KWIN_BUILD_X11
 #include "utils/xcbutils.h"
@@ -118,6 +120,7 @@ BlurEffect::BlurEffect()
     if (!s_blurManager) {
         s_blurManager = new BlurManagerInterface(effects->waylandDisplay(), s_blurManagerRemoveTimer);
     }
+    waylandServer()->backgroundEffectManager()->addBlurCapability();
 
     connect(effects, &EffectsHandler::windowAdded, this, &BlurEffect::slotWindowAdded);
     connect(effects, &EffectsHandler::windowDeleted, this, &BlurEffect::slotWindowDeleted);
@@ -144,6 +147,7 @@ BlurEffect::~BlurEffect()
     if (s_blurManager) {
         s_blurManagerRemoveTimer->start(1000);
     }
+    waylandServer()->backgroundEffectManager()->removeBlurCapability();
 }
 
 void BlurEffect::initBlurStrengthValues()
