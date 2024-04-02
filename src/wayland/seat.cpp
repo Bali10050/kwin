@@ -39,7 +39,7 @@
 
 namespace KWin
 {
-static const int s_version = 9;
+static const int s_version = 10;
 
 /// Maps surface to the surface at @p pos, be it @p surface or one of its subsurfaces
 static SurfaceInterface *mapToSurfaceInPosition(SurfaceInterface *surface, QPointF &pos)
