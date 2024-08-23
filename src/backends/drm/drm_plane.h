@@ -10,6 +10,7 @@
 #pragma once
 
 #include "core/output.h"
+#include "drm_colorop.h"
 #include "drm_object.h"
 
 #include <QMap>
@@ -47,6 +48,7 @@ public:
     void set(DrmAtomicCommit *commit, const QRect &src, const QRect &dst);
 
     QList<QSize> recommendedSizes() const;
+    QList<DrmColorOp *> colorPipelines() const;
 
     enum class TypeIndex : uint64_t {
         Overlay = 0,
@@ -100,6 +102,7 @@ public:
     DrmProperty vmHotspotY;
     DrmProperty inFenceFd;
     DrmProperty sizeHints;
+    DrmProperty colorPipeline;
 
 private:
     std::shared_ptr<DrmFramebuffer> m_current;
@@ -108,6 +111,9 @@ private:
     QHash<uint32_t, QList<uint64_t>> m_supportedFormats;
     uint32_t m_possibleCrtcs = 0;
     QList<QSize> m_sizeHints;
+
+    std::vector<std::unique_ptr<DrmColorOp>> m_colorPipelineObjects;
+    QList<DrmColorOp *> m_colorPipelines;
 };
 
 }

@@ -57,17 +57,19 @@ bool DrmCrtc::updateProperties()
     if (!postBlendingPipeline) {
         DrmAbstractColorOp *next = nullptr;
         if (gammaLut.isValid() && gammaLutSize.isValid() && gammaLutSize.value() > 0) {
-            m_postBlendingColorOps.push_back(std::make_unique<DrmLutColorOp>(next, &gammaLut, gammaLutSize.value()));
+            m_postBlendingColorOps.push_back(std::make_unique<DrmLutColorOp>(next, &gammaLut, nullptr, gammaLutSize.value(), nullptr));
             next = m_postBlendingColorOps.back().get();
         }
-        if (!gpu()->isNVidia() && ctm.isValid()) {
-            m_postBlendingColorOps.push_back(std::make_unique<LegacyMatrixColorOp>(next, &ctm));
-            next = m_postBlendingColorOps.back().get();
-        }
-        if (!gpu()->isNVidia() && !gpu()->isI915() && degammaLut.isValid() && degammaLutSize.isValid() && degammaLutSize.value() > 0) {
-            m_postBlendingColorOps.push_back(std::make_unique<DrmLutColorOp>(next, &degammaLut, degammaLutSize.value()));
-            next = m_postBlendingColorOps.back().get();
-        }
+        // TODO make these conditional on whether or not there's per-plane drm color pipelines
+        // ... or just have the driver do that
+        // if (!gpu()->isNVidia() && ctm.isValid()) {
+        //     m_postBlendingColorOps.push_back(std::make_unique<LegacyMatrixColorOp>(next, &ctm));
+        //     next = m_postBlendingColorOps.back().get();
+        // }
+        // if (!gpu()->isNVidia() && !gpu()->isI915() && degammaLut.isValid() && degammaLutSize.isValid() && degammaLutSize.value() > 0) {
+        //     m_postBlendingColorOps.push_back(std::make_unique<DrmLutColorOp>(next, &degammaLut, degammaLutSize.value(), nullptr));
+        //     next = m_postBlendingColorOps.back().get();
+        // }
         postBlendingPipeline = next;
     }
 

@@ -85,6 +85,7 @@ public:
     bool atomicModeSetting() const;
     bool addFB2ModifiersSupported() const;
     bool asyncPageflipSupported() const;
+    bool colorPipelineSupported() const;
     bool isI915() const;
     bool isNVidia() const;
     bool isAmdgpu() const;
@@ -154,6 +155,7 @@ private:
     QString m_driverName;
     bool m_supportsCursorPlaneHotspot = false;
     bool m_asyncPageflipSupported = false;
+    bool m_colorPipelineSupported = false;
     bool m_isRemoved = false;
     bool m_isActive = true;
     bool m_forceModeset = false;

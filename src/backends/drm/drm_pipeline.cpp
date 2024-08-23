@@ -188,10 +188,22 @@ DrmPipeline::Error DrmPipeline::prepareAtomicPresentation(DrmAtomicCommit *commi
         commit->setVrr(m_pending.crtc, m_pending.presentationMode == PresentationMode::AdaptiveSync || m_pending.presentationMode == PresentationMode::AdaptiveAsync);
     }
 
-    if (m_cursorLayer->isEnabled() && m_primaryLayer->colorPipeline() != m_cursorLayer->colorPipeline()) {
-        return DrmPipeline::Error::InvalidArguments;
+    const auto primaryPipelines = m_pending.crtc->primaryPlane()->colorPipelines();
+    if (m_primaryLayer->colorPipeline().isIdentity()) {
+        if (m_pending.crtc->primaryPlane()->colorPipeline.isValid()) {
+            commit->addProperty(m_pending.crtc->primaryPlane()->colorPipeline, 0);
+        }
+    } else {
+        const auto it = std::ranges::find_if(primaryPipelines, [&](DrmColorOp *pipeline) {
+            return pipeline->colorOp()->matchPipeline(commit, m_primaryLayer->colorPipeline());
+        });
+        if (it == primaryPipelines.end()) {
+            // TODO re-allow merging with post-blending pipeline
+            return DrmPipeline::Error::InvalidArguments;
+        }
+        commit->addProperty(m_pending.crtc->primaryPlane()->colorPipeline, (*it)->id());
     }
-    const ColorPipeline colorPipeline = m_primaryLayer->colorPipeline().merged(m_pending.crtcColorPipeline);
+    const ColorPipeline &colorPipeline = m_pending.crtcColorPipeline;
     if (!m_pending.crtc->postBlendingPipeline) {
         if (!colorPipeline.isIdentity()) {
             return Error::InvalidArguments;
@@ -223,30 +235,35 @@ DrmPipeline::Error DrmPipeline::prepareAtomicPresentation(DrmAtomicCommit *commi
     }
     primary->set(commit, m_primaryLayer->sourceRect().toRect(), m_primaryLayer->targetRect());
     commit->addBuffer(m_pending.crtc->primaryPlane(), fb, frame);
-    switch (m_primaryLayer->colorDescription().yuvCoefficients()) {
-    case YUVMatrixCoefficients::Identity:
-        break;
-    case YUVMatrixCoefficients::BT601:
-        if (!primary->colorEncoding.isValid() || !primary->colorRange.isValid()) {
-            return Error::InvalidArguments;
+
+    // the YUV properties are deprecated with the color pipeline cap
+    // and can't be used anymore
+    if (!gpu()->colorPipelineSupported()) {
+        switch (m_primaryLayer->colorDescription().yuvCoefficients()) {
+        case YUVMatrixCoefficients::Identity:
+            break;
+        case YUVMatrixCoefficients::BT601:
+            if (!primary->colorEncoding.isValid() || !primary->colorRange.isValid()) {
+                return Error::InvalidArguments;
+            }
+            commit->addEnum(primary->colorEncoding, DrmPlane::ColorEncoding::BT601_YCbCr);
+            commit->addEnum(primary->colorRange, DrmPlane::ColorRange::Limited_YCbCr);
+            break;
+        case YUVMatrixCoefficients::BT709:
+            if (!primary->colorEncoding.isValid() || !primary->colorRange.isValid()) {
+                return Error::InvalidArguments;
+            }
+            commit->addEnum(primary->colorEncoding, DrmPlane::ColorEncoding::BT709_YCbCr);
+            commit->addEnum(primary->colorRange, DrmPlane::ColorRange::Limited_YCbCr);
+            break;
+        case YUVMatrixCoefficients::BT2020:
+            if (!primary->colorEncoding.isValid() || !primary->colorRange.isValid()) {
+                return Error::InvalidArguments;
+            }
+            commit->addEnum(primary->colorEncoding, DrmPlane::ColorEncoding::BT2020_YCbCr);
+            commit->addEnum(primary->colorRange, DrmPlane::ColorRange::Limited_YCbCr);
+            break;
         }
-        commit->addEnum(primary->colorEncoding, DrmPlane::ColorEncoding::BT601_YCbCr);
-        commit->addEnum(primary->colorRange, DrmPlane::ColorRange::Limited_YCbCr);
-        break;
-    case YUVMatrixCoefficients::BT709:
-        if (!primary->colorEncoding.isValid() || !primary->colorRange.isValid()) {
-            return Error::InvalidArguments;
-        }
-        commit->addEnum(primary->colorEncoding, DrmPlane::ColorEncoding::BT709_YCbCr);
-        commit->addEnum(primary->colorRange, DrmPlane::ColorRange::Limited_YCbCr);
-        break;
-    case YUVMatrixCoefficients::BT2020:
-        if (!primary->colorEncoding.isValid() || !primary->colorRange.isValid()) {
-            return Error::InvalidArguments;
-        }
-        commit->addEnum(primary->colorEncoding, DrmPlane::ColorEncoding::BT2020_YCbCr);
-        commit->addEnum(primary->colorRange, DrmPlane::ColorRange::Limited_YCbCr);
-        break;
     }
     return Error::None;
 }

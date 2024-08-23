@@ -670,11 +670,11 @@ void DrmOutput::tryKmsColorOffloading()
         return;
     }
     if (usesICC) {
-        colorPipeline.addTransferFunction(encoding.transferFunction());
+        colorPipeline.addTransferFunction(encoding.transferFunction(), ColorspaceType::LinearRGB);
         colorPipeline.addMultiplier(1.0 / encoding.transferFunction().maxLuminance);
-        colorPipeline.add1DLUT(m_state.iccProfile->inverseTransferFunction());
+        colorPipeline.add1DLUT(m_state.iccProfile->inverseTransferFunction(), ColorspaceType::NonLinearRGB);
         if (m_state.iccProfile->vcgt()) {
-            colorPipeline.add1DLUT(m_state.iccProfile->vcgt());
+            colorPipeline.add1DLUT(m_state.iccProfile->vcgt(), ColorspaceType::NonLinearRGB);
         }
     }
     m_pipeline->setCrtcColorPipeline(colorPipeline);
@@ -689,7 +689,7 @@ void DrmOutput::tryKmsColorOffloading()
         // This isn't technically correct, but the difference is quite small and not worth
         // losing a lot of performance and battery life over
         ColorPipeline simplerPipeline;
-        simplerPipeline.addMatrix(m_blendingColorDescription.toOther(encoding, RenderingIntent::AbsoluteColorimetric), colorPipeline.currentOutputRange());
+        simplerPipeline.addMatrix(m_blendingColorDescription.toOther(encoding, RenderingIntent::AbsoluteColorimetric), colorPipeline.currentOutputRange(), ColorspaceType::NonLinearRGB);
         m_pipeline->setCrtcColorPipeline(colorPipeline);
         if (DrmPipeline::commitPipelines({m_pipeline}, DrmPipeline::CommitMode::Test) == DrmPipeline::Error::None) {
             m_pipeline->applyPendingChanges();

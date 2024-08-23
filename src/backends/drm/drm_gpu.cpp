@@ -45,6 +45,9 @@
 #ifndef DRM_CAP_ATOMIC_ASYNC_PAGE_FLIP
 #define DRM_CAP_ATOMIC_ASYNC_PAGE_FLIP 0x15
 #endif
+#ifndef DRM_CLIENT_CAP_PLANE_COLOR_PIPELINE
+#define DRM_CLIENT_CAP_PLANE_COLOR_PIPELINE 7
+#endif
 
 namespace KWin
 {
@@ -105,6 +108,8 @@ DrmGpu::DrmGpu(DrmBackend *backend, int fd, std::unique_ptr<DrmDevice> &&device)
     } else {
         m_asyncPageflipSupported = drmGetCap(fd, DRM_CAP_ATOMIC_ASYNC_PAGE_FLIP, &capability) == 0 && capability == 1;
     }
+
+    m_colorPipelineSupported = drmSetClientCap(fd, DRM_CLIENT_CAP_PLANE_COLOR_PIPELINE, 1) == 0;
 }
 
 DrmGpu::~DrmGpu()
@@ -341,10 +346,10 @@ void DrmGpu::removeOutputs()
 
 DrmPipeline::Error DrmGpu::checkCrtcAssignment(QList<DrmConnector *> connectors, const QList<DrmCrtc *> &crtcs)
 {
-    qCDebug(KWIN_DRM) << "Attempting to match" << connectors << "with" << crtcs;
+    // qCDebug(KWIN_DRM) << "Attempting to match" << connectors << "with" << crtcs;
     if (connectors.isEmpty()) {
         const auto result = testPipelines();
-        qCDebug(KWIN_DRM) << "Testing CRTC assignment..." << (result == DrmPipeline::Error::None ? "passed" : "failed");
+        // qCDebug(KWIN_DRM) << "Testing CRTC assignment..." << (result == DrmPipeline::Error::None ? "passed" : "failed");
         return result;
     }
     auto connector = connectors.takeFirst();
@@ -357,7 +362,7 @@ DrmPipeline::Error DrmGpu::checkCrtcAssignment(QList<DrmConnector *> connectors,
     if (!pipeline->enabled() || !connector->isConnected()) {
         // disabled pipelines don't need CRTCs
         pipeline->setCrtc(nullptr);
-        qCDebug(KWIN_DRM) << "Unassigning CRTC from connector" << connector->id();
+        // qCDebug(KWIN_DRM) << "Unassigning CRTC from connector" << connector->id();
         return checkCrtcAssignment(connectors, crtcs);
     }
     if (crtcs.isEmpty()) {
@@ -377,7 +382,7 @@ DrmPipeline::Error DrmGpu::checkCrtcAssignment(QList<DrmConnector *> connectors,
             auto crtcsLeft = crtcs;
             crtcsLeft.removeOne(currentCrtc);
             pipeline->setCrtc(currentCrtc);
-            qCDebug(KWIN_DRM) << "Assigning CRTC" << currentCrtc->id() << "to connector" << connector->id();
+            // qCDebug(KWIN_DRM) << "Assigning CRTC" << currentCrtc->id() << "to connector" << connector->id();
             do {
                 DrmPipeline::Error err = checkCrtcAssignment(connectors, crtcsLeft);
                 if (err == DrmPipeline::Error::None || err == DrmPipeline::Error::NoPermission || err == DrmPipeline::Error::FramePending) {
@@ -391,7 +396,7 @@ DrmPipeline::Error DrmGpu::checkCrtcAssignment(QList<DrmConnector *> connectors,
             auto crtcsLeft = crtcs;
             crtcsLeft.removeOne(crtc);
             pipeline->setCrtc(crtc);
-            qCDebug(KWIN_DRM) << "Assigning CRTC" << crtc->id() << "to connector" << connector->id();
+            // qCDebug(KWIN_DRM) << "Assigning CRTC" << crtc->id() << "to connector" << connector->id();
             do {
                 DrmPipeline::Error err = checkCrtcAssignment(connectors, crtcsLeft);
                 if (err == DrmPipeline::Error::None || err == DrmPipeline::Error::NoPermission || err == DrmPipeline::Error::FramePending) {
@@ -655,6 +660,11 @@ bool DrmGpu::addFB2ModifiersSupported() const
 bool DrmGpu::asyncPageflipSupported() const
 {
     return m_asyncPageflipSupported;
+}
+
+bool DrmGpu::colorPipelineSupported() const
+{
+    return m_colorPipelineSupported;
 }
 
 bool DrmGpu::isI915() const

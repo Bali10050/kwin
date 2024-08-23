@@ -114,7 +114,7 @@ bool EglGbmLayer::doImportScanoutBuffer(GraphicsBuffer *buffer, const ColorDescr
         // it's likely not worth making this code more complicated to handle those edge cases
         return false;
     }
-    m_colorPipeline = ColorPipeline::create(color, m_pipeline->output()->scanoutColorDescription(), intent);
+    m_colorPipeline = ColorPipeline::create(color, m_pipeline->output()->scanoutColorDescription(), intent, m_pipeline->gpu()->colorPipelineSupported());
     if (!m_colorPipeline.isIdentity() && m_pipeline->output()->colorPowerTradeoff() == Output::ColorPowerTradeoff::PreferAccuracy) {
         return false;
     }
