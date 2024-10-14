@@ -47,6 +47,7 @@ private Q_SLOTS:
     // NOTE: Mouse buttons are not tested because those are used in the other tests
     void testBindingTabletPad();
     void testBindingTabletTool();
+    void testBindingTabletPadDial();
 
     void testMouseTabletCursorSync();
 
@@ -291,6 +292,45 @@ void TestButtonRebind::testBindingTabletPad()
     QCOMPARE(keyChangedSpy.at(0).at(0), KEY_A);
 
     Test::tabletPadButtonReleased(1, timestamp++);
+}
+
+void TestButtonRebind::testBindingTabletPadDial()
+{
+    const QKeySequence sequence(Qt::Key_A);
+    const QKeySequence secondSequence(Qt::Key_B);
+
+    KConfigGroup buttonGroup = KSharedConfig::openConfig(QStringLiteral("kcminputrc"))->group(QStringLiteral("ButtonRebinds")).group(QStringLiteral("TabletDial")).group(QStringLiteral("Virtual Tablet Pad 1"));
+    buttonGroup.writeEntry("0", QStringList{"Scroll"}, KConfig::Notify);
+    buttonGroup.sync();
+
+    kwinApp()->pluginManager()->unloadPlugin(s_pluginName);
+    kwinApp()->pluginManager()->loadPlugin(s_pluginName);
+
+    std::unique_ptr<KWayland::Client::Surface> surface = Test::createSurface();
+    std::unique_ptr<Test::XdgToplevel> shellSurface = Test::createXdgToplevelSurface(surface.get());
+    Test::renderAndWaitForShown(surface.get(), QSize(100, 50), Qt::blue);
+
+    std::unique_ptr<KWayland::Client::Pointer> pointer(Test::waylandSeat()->createPointer());
+    QSignalSpy enteredSpy(pointer.get(), &KWayland::Client::Pointer::entered);
+    QSignalSpy axisChangedSpy(pointer.get(), &KWayland::Client::Pointer::axisChanged);
+    QVERIFY(enteredSpy.wait());
+
+    // twisting the dial "up"
+    Test::tabletPadDialEvent(-120.0, 0, timestamp++);
+
+    using KWayland::Client::Keyboard;
+
+    QVERIFY(axisChangedSpy.wait());
+    QCOMPARE(axisChangedSpy.count(), 1);
+    QCOMPARE(axisChangedSpy.at(0).at(2).value<qreal>(), -120.0);
+
+    // twisting the dial "down"
+    axisChangedSpy.clear();
+    Test::tabletPadDialEvent(120.0, 0, timestamp++);
+
+    QVERIFY(axisChangedSpy.wait());
+    QCOMPARE(axisChangedSpy.count(), 1);
+    QCOMPARE(axisChangedSpy.at(0).at(2).value<qreal>(), 120.0);
 }
 
 void TestButtonRebind::testBindingTabletTool()
