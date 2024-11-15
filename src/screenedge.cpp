@@ -144,6 +144,7 @@ Edge::Edge(ScreenEdges *parent)
 
 Edge::~Edge()
 {
+    m_edges->gestureRecognizer()->unregisterSwipeGesture(m_gesture.get());
     stopApproaching();
 }
 
@@ -761,8 +762,14 @@ ScreenEdges::ScreenEdges()
     , m_actionBottomLeft(ElectricActionNone)
     , m_actionLeft(ElectricActionNone)
     , m_cornerOffset(40)
-    , m_gestureRecognizer(new GestureRecognizer(this))
+    , m_gestureRecognizer(std::make_unique<GestureRecognizer>())
 {
+}
+
+ScreenEdges::~ScreenEdges()
+{
+    // ensure that edges get destroyed before the recognizer
+    m_edges.clear();
 }
 
 void ScreenEdges::init()
@@ -1231,6 +1238,11 @@ ElectricBorderAction ScreenEdges::actionForTouchEdge(Edge *edge) const
 ElectricBorderAction ScreenEdges::actionForTouchBorder(ElectricBorder border) const
 {
     return m_touchCallbacks.value(border);
+}
+
+GestureRecognizer *ScreenEdges::gestureRecognizer() const
+{
+    return m_gestureRecognizer.get();
 }
 
 void ScreenEdges::reserveDesktopSwitching(bool isToReserve, Qt::Orientations o)

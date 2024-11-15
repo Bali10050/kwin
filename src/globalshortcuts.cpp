@@ -87,8 +87,8 @@ PinchGesture *GlobalShortcut::pinchGesture() const
 
 GlobalShortcutsManager::GlobalShortcutsManager(QObject *parent)
     : QObject(parent)
-    , m_touchpadGestureRecognizer(new GestureRecognizer(this))
-    , m_touchscreenGestureRecognizer(new GestureRecognizer(this))
+    , m_touchpadGestureRecognizer(std::make_unique<GestureRecognizer>())
+    , m_touchscreenGestureRecognizer(std::make_unique<GestureRecognizer>())
 {
 }
 
@@ -115,6 +115,14 @@ void GlobalShortcutsManager::objectDeleted(QObject *object)
     auto it = m_shortcuts.begin();
     while (it != m_shortcuts.end()) {
         if (it->action() == object) {
+            if (it->swipeGesture()) {
+                m_touchpadGestureRecognizer->unregisterSwipeGesture(it->swipeGesture());
+                m_touchscreenGestureRecognizer->unregisterSwipeGesture(it->swipeGesture());
+            }
+            if (it->pinchGesture()) {
+                m_touchpadGestureRecognizer->unregisterPinchGesture(it->pinchGesture());
+                m_touchscreenGestureRecognizer->unregisterPinchGesture(it->pinchGesture());
+            }
             it = m_shortcuts.erase(it);
         } else {
             ++it;
@@ -182,6 +190,7 @@ void GlobalShortcutsManager::forceRegisterTouchscreenSwipe(SwipeDirection direct
         return shortcut.shortcut() == s.shortcut();
     });
     if (it != m_shortcuts.end()) {
+        m_touchscreenGestureRecognizer->unregisterSwipeGesture(it->swipeGesture());
         m_shortcuts.erase(it);
     }
     m_touchscreenGestureRecognizer->registerSwipeGesture(shortcut.swipeGesture());

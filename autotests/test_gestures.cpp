@@ -467,7 +467,7 @@ void GestureTest::testDeleteSwipeCancels()
     recognizer.startSwipeGesture(1);
     QCOMPARE(startedSpy.count(), 1);
     QCOMPARE(cancelledSpy.count(), 0);
-    gesture.reset();
+    recognizer.unregisterSwipeGesture(gesture.get());
     QCOMPARE(cancelledSpy.count(), 1);
 }
 
