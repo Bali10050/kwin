@@ -692,6 +692,8 @@ double TransferFunction::defaultMinLuminanceFor(Type type)
     case Type::gamma22:
     case Type::linear:
         return 0.2;
+    case Type::BT1886:
+        return 0.01;
     case Type::PerceptualQuantizer:
         return 0.005;
     }
@@ -705,6 +707,8 @@ double TransferFunction::defaultMaxLuminanceFor(Type type)
     case Type::gamma22:
     case Type::linear:
         return 80;
+    case Type::BT1886:
+        return 100;
     case Type::PerceptualQuantizer:
         return 10'000;
     }
@@ -720,6 +724,8 @@ double TransferFunction::defaultReferenceLuminanceFor(Type type)
     case Type::sRGB:
     case Type::gamma22:
         return 80;
+    case Type::BT1886:
+        return 100;
     }
     Q_UNREACHABLE();
 }
@@ -770,6 +776,14 @@ double TransferFunction::encodedToNits(double encoded) const
         const double den = c2 - c3 * powed;
         return std::pow(num / den, m1_inv) * (maxLuminance - minLuminance) + minLuminance;
     }
+    case TransferFunction::BT1886: {
+        constexpr double gamma = 2.4;
+        const double minLumPow = std::pow(minLuminance, 1.0 / gamma);
+        const double tmp = std::pow(maxLuminance, 1.0 / gamma) - minLumPow;
+        const double alpha = std::pow(tmp, gamma);
+        const double beta = minLumPow / tmp;
+        return alpha * std::pow(std::max(encoded + beta, 0.0), gamma);
+    }
     }
     Q_UNREACHABLE();
 }
@@ -810,6 +824,14 @@ double TransferFunction::nitsToEncoded(double nits) const
         const double denum = 1 + c3 * powed;
         return std::pow(num / denum, m2);
     }
+    case TransferFunction::BT1886: {
+        constexpr double gamma = 2.4;
+        const double minLumPow = std::pow(minLuminance, 1.0 / gamma);
+        const double tmp = std::pow(maxLuminance, 1.0 / gamma) - minLumPow;
+        const double alpha = std::pow(tmp, gamma);
+        const double beta = minLumPow / tmp;
+        return std::pow(nits / alpha, 1.0 / gamma) - beta;
+    }
     }
     Q_UNREACHABLE();
 }
@@ -829,6 +851,7 @@ bool TransferFunction::isRelative() const
     switch (type) {
     case TransferFunction::gamma22:
     case TransferFunction::sRGB:
+    case TransferFunction::BT1886:
         return true;
     case TransferFunction::linear:
     case TransferFunction::PerceptualQuantizer:
@@ -844,6 +867,18 @@ TransferFunction TransferFunction::relativeScaledTo(double referenceLuminance) c
     } else {
         return *this;
     }
+}
+
+double TransferFunction::bt1886A() const
+{
+    return std::pow(std::pow(maxLuminance, 1.0 / 2.4) - std::pow(minLuminance, 1.0 / 2.4), 2.4);
+}
+
+double TransferFunction::bt1886B() const
+{
+    const double powBlack = std::pow(minLuminance, 1.0 / 2.4);
+    const double powWhite = std::pow(maxLuminance, 1.0 / 2.4);
+    return powBlack / (powWhite - powBlack);
 }
 }
 

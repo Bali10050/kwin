@@ -162,6 +162,7 @@ public:
         linear = 1,
         PerceptualQuantizer = 2,
         gamma22 = 3,
+        BT1886 = 4,
     };
     explicit TransferFunction(Type tf);
     explicit TransferFunction(Type tf, double minLuminance, double maxLuminance);
@@ -176,6 +177,9 @@ public:
     QVector3D nitsToEncoded(const QVector3D &nits) const;
     QVector4D encodedToNits(const QVector4D &encoded) const;
     QVector4D nitsToEncoded(const QVector4D &nits) const;
+
+    double bt1886A() const;
+    double bt1886B() const;
 
     Type type;
     /**
