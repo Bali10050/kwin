@@ -5,8 +5,8 @@
 */
 
 #include "scene/item.h"
+#include "core/outputlayer.h"
 #include "core/pixelgrid.h"
-#include "core/renderlayer.h"
 #include "scene/scene.h"
 #include "utils/common.h"
 #include "workspace.h"
@@ -146,7 +146,7 @@ void Item::setScene(Scene *scene)
     }
     if (m_scene) {
         for (auto it = m_repaints.constBegin(); it != m_repaints.constEnd(); ++it) {
-            SceneDelegate *delegate = it.key();
+            SceneView *delegate = it.key();
             const QRegion &dirty = it.value();
             if (!dirty.isEmpty()) {
                 m_scene->addRepaint(delegate, dirty);
@@ -296,7 +296,7 @@ QRectF Item::mapFromScene(const QRectF &rect) const
     return m_sceneToItemTransform.mapRect(rect);
 }
 
-QRect Item::paintedArea(SceneDelegate *delegate, const QRectF &rect) const
+QRect Item::paintedArea(SceneView *delegate, const QRectF &rect) const
 {
     const qreal scale = delegate->scale();
 
@@ -310,7 +310,7 @@ QRect Item::paintedArea(SceneDelegate *delegate, const QRectF &rect) const
     return scaledRect(snapped, 1.0 / scale).toAlignedRect();
 }
 
-QRegion Item::paintedArea(SceneDelegate *delegate, const QRegion &region) const
+QRegion Item::paintedArea(SceneView *delegate, const QRegion &region) const
 {
     if (region.isEmpty()) {
         return QRegion();
@@ -402,7 +402,7 @@ void Item::scheduleRepaint(const QRegion &region)
     }
 }
 
-void Item::scheduleRepaint(SceneDelegate *delegate, const QRegion &region)
+void Item::scheduleRepaint(SceneView *delegate, const QRegion &region)
 {
     if (isVisible()) {
         scheduleRepaintInternal(delegate, region);
@@ -414,20 +414,20 @@ void Item::scheduleRepaintInternal(const QRegion &region)
     if (Q_UNLIKELY(!m_scene)) {
         return;
     }
-    const QList<SceneDelegate *> delegates = m_scene->delegates();
-    for (SceneDelegate *delegate : delegates) {
+    const QList<SceneView *> delegates = m_scene->views();
+    for (SceneView *delegate : delegates) {
         if (!delegate->shouldRenderItem(this)) {
             continue;
         }
         const QRegion dirtyRegion = paintedArea(delegate, region) & delegate->viewport();
         if (!dirtyRegion.isEmpty()) {
             m_repaints[delegate] += dirtyRegion;
-            delegate->layer()->scheduleRepaint(this);
+            delegate->scheduleRepaint(this);
         }
     }
 }
 
-void Item::scheduleRepaintInternal(SceneDelegate *delegate, const QRegion &region)
+void Item::scheduleRepaintInternal(SceneView *delegate, const QRegion &region)
 {
     if (Q_UNLIKELY(!m_scene) || !delegate->shouldRenderItem(this)) {
         return;
@@ -435,7 +435,7 @@ void Item::scheduleRepaintInternal(SceneDelegate *delegate, const QRegion &regio
     const QRegion dirtyRegion = paintedArea(delegate, region) & delegate->viewport();
     if (!dirtyRegion.isEmpty()) {
         m_repaints[delegate] += dirtyRegion;
-        delegate->layer()->scheduleRepaint(this);
+        delegate->scheduleRepaint(this);
     }
 }
 
@@ -447,14 +447,14 @@ void Item::scheduleFrame()
     if (Q_UNLIKELY(!m_scene)) {
         return;
     }
-    const QList<SceneDelegate *> delegates = m_scene->delegates();
-    for (SceneDelegate *delegate : delegates) {
+    const QList<SceneView *> delegates = m_scene->views();
+    for (SceneView *delegate : delegates) {
         if (!delegate->shouldRenderItem(this)) {
             continue;
         }
         const QRect geometry = paintedArea(delegate, rect());
         if (delegate->viewport().intersects(geometry)) {
-            delegate->layer()->scheduleRepaint(this);
+            delegate->scheduleRepaint(this);
         }
     }
 }
@@ -464,8 +464,8 @@ void Item::scheduleSceneRepaintInternal(const QRegion &region)
     if (Q_UNLIKELY(!m_scene)) {
         return;
     }
-    const QList<SceneDelegate *> delegates = m_scene->delegates();
-    for (SceneDelegate *delegate : delegates) {
+    const QList<SceneView *> delegates = m_scene->views();
+    for (SceneView *delegate : delegates) {
         if (!delegate->shouldRenderItem(this)) {
             continue;
         }
@@ -498,7 +498,7 @@ WindowQuadList Item::quads() const
     return m_quads.value();
 }
 
-QRegion Item::takeRepaints(SceneDelegate *delegate)
+QRegion Item::takeRepaints(SceneView *delegate)
 {
     auto &repaints = m_repaints[delegate];
     QRegion reg;
@@ -506,12 +506,12 @@ QRegion Item::takeRepaints(SceneDelegate *delegate)
     return reg;
 }
 
-void Item::resetRepaints(SceneDelegate *delegate)
+void Item::resetRepaints(SceneView *delegate)
 {
     m_repaints.insert(delegate, QRegion());
 }
 
-void Item::removeRepaints(SceneDelegate *delegate)
+void Item::removeRepaints(SceneView *delegate)
 {
     m_repaints.remove(delegate);
 }
