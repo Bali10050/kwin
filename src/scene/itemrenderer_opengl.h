@@ -36,9 +36,9 @@ public:
 
     struct RenderContext
     {
-        QList<RenderNode> renderNodes;
-        QStack<QMatrix4x4> transformStack;
-        QStack<qreal> opacityStack;
+        QList<RenderNode> renderNodes = {};
+        QStack<QMatrix4x4> transformStack = {};
+        QStack<qreal> opacityStack = {};
         const QMatrix4x4 projectionMatrix;
         const QMatrix4x4 rootTransform;
         const QRegion clip;
