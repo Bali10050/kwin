@@ -3595,6 +3595,15 @@ void InputDeviceHandler::updateDecoration()
     setDecoration(decoration);
 }
 
+static bool isPopupParentOf(Window *maybePopup, Window *maybeParent)
+{
+    if (!maybePopup->isPopupWindow()) {
+        return false;
+    }
+    Window *const parent = maybePopup->transientFor();
+    return parent == maybeParent || (parent && isPopupParentOf(parent, maybeParent));
+}
+
 void InputDeviceHandler::update()
 {
     if (!m_inited) {
@@ -3608,7 +3617,12 @@ void InputDeviceHandler::update()
     // Always set the window at the position of the input device.
     setHover(window);
 
-    if (focusUpdatesBlocked()) {
+    bool popupRelationship = false;
+    if (window && m_focus.window) {
+        popupRelationship = isPopupParentOf(window, m_focus.window) || isPopupParentOf(m_focus.window, window);
+    }
+
+    if (focusUpdatesBlocked() && !popupRelationship) {
         workspace()->updateFocusMousePosition(position());
         return;
     }
