@@ -76,6 +76,12 @@ public:
 
     Output::SubPixel subpixel() const;
 
+    bool isTiled() const;
+    int tileGroup() const;
+    QPointF tilePosition() const;
+    QSizeF tileSize() const;
+    QSize totalTiledOutputSize() const;
+
     enum class UnderscanOptions : uint64_t {
         Off = 0,
         On = 1,
@@ -135,6 +141,7 @@ public:
     DrmEnumProperty<ScalingMode> scalingMode;
     DrmEnumProperty<Colorspace> colorspace;
     DrmProperty path;
+    DrmProperty tile;
 
     static DrmContentType kwinToDrmContentType(ContentType type);
     static OutputTransform toKWinTransform(PanelOrientation orientation);
@@ -144,6 +151,16 @@ public:
 private:
     QList<std::shared_ptr<DrmConnectorMode>> generateCommonModes();
     std::shared_ptr<DrmConnectorMode> generateMode(const QSize &size, float refreshRate);
+
+    struct TilingInfo
+    {
+        bool isTiled = false;
+        int groupId;
+        bool isSingleMonitor = true;
+        QSize numTiles = QSize(1, 1);
+        QPoint tileLocation = QPoint(0, 0);
+        QSize tilePixelSize;
+    } m_tilingInfo;
 
     DrmUniquePtr<drmModeConnector> m_conn;
     Edid m_edid;

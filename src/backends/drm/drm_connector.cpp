@@ -147,6 +147,7 @@ DrmConnector::DrmConnector(DrmGpu *gpu, uint32_t connectorId)
                                                             QByteArrayLiteral("BT2020_YCC"),
                                                         })
     , path(this, QByteArrayLiteral("PATH"))
+    , tile(this, QByteArrayLiteral("TILE"))
 {
 }
 
@@ -324,7 +325,57 @@ bool DrmConnector::updateProperties()
         }
     }
 
+    if (tile.isValid() && tile.immutableBlob()) {
+        int flags, numTilesX, numTilesY, tileLocX, tileLocY, tileWidth, tileHeight;
+        int parsed = sscanf(static_cast<char *>(tile.immutableBlob()->data), "%d:%d:%d:%d:%d:%d:%d:%d",
+                            &m_tilingInfo.groupId, &flags, &numTilesX, &numTilesY, &tileLocX, &tileLocY, &tileWidth, &tileHeight);
+        if (parsed == 8) {
+            m_tilingInfo.isTiled = true;
+            m_tilingInfo.isSingleMonitor = flags & 1;
+            m_tilingInfo.numTiles = {numTilesX, numTilesY};
+            m_tilingInfo.tileLocation = {tileLocX, tileLocY};
+            m_tilingInfo.tilePixelSize = {tileWidth, tileHeight};
+
+            if (!m_driverModes.empty()) {
+                qWarning() << "tiling info for" << connectorName() << m_driverModes.front()->size() << "" << m_tilingInfo.isTiled << m_tilingInfo.numTiles << m_tilingInfo.tileLocation << m_tilingInfo.tilePixelSize;
+            } else {
+                qWarning() << "tiling info for" << connectorName() << "without modes??";
+            }
+
+        } else {
+            qCWarning(KWIN_DRM, "Failed to parse the TILE blob of connector %d! Blob contained %d integers", id(), parsed);
+            m_tilingInfo.isTiled = false;
+        }
+    } else {
+        m_tilingInfo.isTiled = false;
+    }
+
     return true;
+}
+
+bool DrmConnector::isTiled() const
+{
+    return m_tilingInfo.isTiled;
+}
+
+int DrmConnector::tileGroup() const
+{
+    return m_tilingInfo.groupId;
+}
+
+QPointF DrmConnector::tilePosition() const
+{
+    return QPointF((m_tilingInfo.tileLocation.x() - 1) / float(m_tilingInfo.numTiles.width()), (m_tilingInfo.tileLocation.y() - 1) / float(m_tilingInfo.numTiles.height()));
+}
+
+QSizeF DrmConnector::tileSize() const
+{
+    return QSizeF(1.0f / m_tilingInfo.numTiles.width(), 1.0f / m_tilingInfo.numTiles.height());
+}
+
+QSize DrmConnector::totalTiledOutputSize() const
+{
+    return QSize(m_tilingInfo.tilePixelSize.width() * m_tilingInfo.numTiles.width(), m_tilingInfo.tilePixelSize.height() * m_tilingInfo.numTiles.height());
 }
 
 bool DrmConnector::isCrtcSupported(DrmCrtc *crtc) const
