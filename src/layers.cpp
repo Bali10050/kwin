@@ -29,7 +29,7 @@
 
  Every window has one layer assigned in which it is. There are 7 layers,
  from bottom : DesktopLayer, BelowLayer, NormalLayer, DockLayer, AboveLayer, NotificationLayer,
- ActiveLayer, CriticalNotificationLayer, and OnScreenDisplayLayer (see also NETWM sect.7.10.).
+ CriticalNotificationLayer, and OnScreenDisplayLayer (see also NETWM sect.7.10.).
  The layer a window is in depends on the window type, and on other things like whether the window
  is active. We extend the layers provided in NETWM by the NotificationLayer, OnScreenDisplayLayer,
  and CriticalNotificationLayer.
@@ -245,41 +245,8 @@ Window *Workspace::findDesktop(VirtualDesktop *desktop, Output *output) const
     return nullptr;
 }
 
-#if KWIN_BUILD_X11
-static Layer layerForWindow(const X11Window *window)
-{
-    Layer layer = window->layer();
-
-    // Desktop windows cannot be promoted to upper layers.
-    if (layer == DesktopLayer) {
-        return layer;
-    }
-
-    if (const Group *group = window->group()) {
-        const auto members = group->members();
-        for (const X11Window *member : members) {
-            if (member == window) {
-                continue;
-            } else if (member->output() != window->output()) {
-                continue;
-            }
-            if (member->layer() == ActiveLayer) {
-                return ActiveLayer;
-            }
-        }
-    }
-
-    return layer;
-}
-#endif
-
 static Layer computeLayer(const Window *window)
 {
-#if KWIN_BUILD_X11
-    if (auto x11Window = qobject_cast<const X11Window *>(window)) {
-        return layerForWindow(x11Window);
-    }
-#endif
     return window->layer();
 }
 
