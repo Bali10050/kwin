@@ -52,7 +52,7 @@ public:
 
 Q_SIGNALS:
     /**
-     * Gesture matching ended and this Gesture matched.
+     * Gesture matching ended and this StrokeGesture matched.
      */
     void triggered();
 
