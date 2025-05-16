@@ -188,7 +188,7 @@ vec4 nitsToEncoding(vec4 color, int destinationTransferFunction, float luminance
     } else if (destinationTransferFunction == BT1886_EOTF) {
         color.rgb /= max(color.a, 0.001);
         // for bt1886, luminanceScale = a, luminanceOffset = b
-        color.rgb = pow(color.rgb / luminanceScale, vec3(1.0 / 2.4)) - vec3(luminanceScale);
+        color.rgb = pow(color.rgb / luminanceScale, vec3(1.0 / 2.4)) - vec3(luminanceOffset);
         color.rgb *= color.a;
     }
     return color;
