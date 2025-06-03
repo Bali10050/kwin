@@ -15,7 +15,7 @@
 
 namespace KWin
 {
-static const quint32 s_version = 2;
+static const quint32 s_version = 3;
 
 class PlasmaVirtualDesktopInterfacePrivate : public QtWaylandServer::org_kde_plasma_virtual_desktop
 {
@@ -38,6 +38,7 @@ class PlasmaVirtualDesktopManagementInterfacePrivate : public QtWaylandServer::o
 public:
     PlasmaVirtualDesktopManagementInterfacePrivate(PlasmaVirtualDesktopManagementInterface *_q, Display *display);
 
+    QTimer doneTimer;
     QList<PlasmaVirtualDesktopInterface *> desktops;
     quint32 rows = 0;
     quint32 columns = 0;
@@ -116,6 +117,14 @@ PlasmaVirtualDesktopManagementInterface::PlasmaVirtualDesktopManagementInterface
     : QObject(parent)
     , d(new PlasmaVirtualDesktopManagementInterfacePrivate(this, display))
 {
+    d->doneTimer.setSingleShot(true);
+    d->doneTimer.setInterval(0);
+    connect(&d->doneTimer, &QTimer::timeout, this, [this]() {
+        const auto clientResources = d->resourceMap();
+        for (auto resource : clientResources) {
+            d->send_done(resource->handle);
+        }
+    });
 }
 
 PlasmaVirtualDesktopManagementInterface::~PlasmaVirtualDesktopManagementInterface()
@@ -206,12 +215,9 @@ QList<PlasmaVirtualDesktopInterface *> PlasmaVirtualDesktopManagementInterface::
     return d->desktops;
 }
 
-void PlasmaVirtualDesktopManagementInterface::sendDone()
+void PlasmaVirtualDesktopManagementInterface::scheduleDone()
 {
-    const auto clientResources = d->resourceMap();
-    for (auto resource : clientResources) {
-        d->send_done(resource->handle);
-    }
+    d->doneTimer.start();
 }
 
 //// PlasmaVirtualDesktopInterface
@@ -311,7 +317,9 @@ void PlasmaVirtualDesktopInterface::sendDone()
 {
     const auto clientResources = d->resourceMap();
     for (auto resource : clientResources) {
-        d->send_done(resource->handle);
+        if (resource->version() < 3) {
+            d->send_done(resource->handle);
+        }
     }
 }
 

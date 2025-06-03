@@ -21,6 +21,7 @@
 // Qt
 #include <QAction>
 #include <QDebug>
+#include <QTimer>
 #include <QUuid>
 
 #include <algorithm>
@@ -55,10 +56,12 @@ void VirtualDesktopManager::setVirtualDesktopManagement(PlasmaVirtualDesktopMana
         PlasmaVirtualDesktopInterface *pvd = m_virtualDesktopManagement->createDesktop(desktop->id(), desktop->x11DesktopNumber() - 1);
         pvd->setName(desktop->name());
         pvd->sendDone();
+        m_virtualDesktopManagement->scheduleDone();
 
-        connect(desktop, &VirtualDesktop::nameChanged, pvd, [desktop, pvd]() {
+        connect(desktop, &VirtualDesktop::nameChanged, pvd, [this, desktop, pvd]() {
             pvd->setName(desktop->name());
             pvd->sendDone();
+            m_virtualDesktopManagement->scheduleDone();
         });
         connect(pvd, &PlasmaVirtualDesktopInterface::activateRequested, this, [this, desktop]() {
             setCurrent(desktop);
@@ -69,12 +72,13 @@ void VirtualDesktopManager::setVirtualDesktopManagement(PlasmaVirtualDesktopMana
 
     connect(this, &VirtualDesktopManager::rowsChanged, m_virtualDesktopManagement, [this](uint rows) {
         m_virtualDesktopManagement->setRows(rows);
-        m_virtualDesktopManagement->sendDone();
+        m_virtualDesktopManagement->scheduleDone();
     });
 
     // handle removed: from VirtualDesktopManager to the wayland interface
     connect(this, &VirtualDesktopManager::desktopRemoved, m_virtualDesktopManagement, [this](VirtualDesktop *desktop) {
         m_virtualDesktopManagement->removeDesktop(desktop->id());
+        m_virtualDesktopManagement->scheduleDone();
     });
 
     // create a new desktop when the client asks to
@@ -103,7 +107,7 @@ void VirtualDesktopManager::setVirtualDesktopManagement(PlasmaVirtualDesktopMana
     std::for_each(m_desktops.constBegin(), m_desktops.constEnd(), createPlasmaVirtualDesktop);
 
     m_virtualDesktopManagement->setRows(rows());
-    m_virtualDesktopManagement->sendDone();
+    m_virtualDesktopManagement->scheduleDone();
 }
 
 void VirtualDesktop::setId(const QString &id)
