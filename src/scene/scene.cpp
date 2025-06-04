@@ -87,7 +87,9 @@ void SceneView::postPaint()
 
 void SceneView::paint(const RenderTarget &renderTarget, const QRegion &region)
 {
-    m_scene->paint(renderTarget, region == infiniteRegion() ? infiniteRegion() : region.translated(viewport().topLeft()));
+    // FIXME damage in logical coordinates may cause issues here
+    // if the viewport is on a non-integer position!
+    m_scene->paint(renderTarget, region == infiniteRegion() ? infiniteRegion() : region.translated(viewport().topLeft().toPoint()));
 }
 
 double SceneView::desiredHdrHeadroom() const
@@ -100,9 +102,9 @@ void SceneView::frame(OutputFrame *frame)
     m_scene->frame(this, frame);
 }
 
-QRect SceneView::viewport() const
+QRectF SceneView::viewport() const
 {
-    return m_output ? m_output->geometry() : m_scene->geometry();
+    return m_output ? m_output->geometryF() : m_scene->geometry();
 }
 
 void SceneView::hideItem(Item *item)
@@ -136,12 +138,12 @@ ItemTreeView::~ItemTreeView()
 {
 }
 
-void ItemTreeView::setViewport(const QRect &viewport)
+void ItemTreeView::setViewport(const QRectF &viewport)
 {
     m_viewport = viewport;
 }
 
-QRect ItemTreeView::viewport() const
+QRectF ItemTreeView::viewport() const
 {
     return m_viewport;
 }
@@ -217,9 +219,11 @@ void Scene::addRepaint(int x, int y, int width, int height)
 void Scene::addRepaint(const QRegion &region)
 {
     for (const auto &view : std::as_const(m_views)) {
-        const QRect viewport = view->viewport();
-        QRegion dirtyRegion = region & viewport;
-        dirtyRegion.translate(-viewport.topLeft());
+        const QRectF viewport = view->viewport();
+        QRegion dirtyRegion = region & viewport.toAlignedRect();
+        // FIXME damage in logical coordinates may cause issues here
+        // if the viewport is on a non-integer position!
+        dirtyRegion.translate(-viewport.topLeft().toPoint());
         if (!dirtyRegion.isEmpty()) {
             view->addRepaint(dirtyRegion);
         }
@@ -228,7 +232,9 @@ void Scene::addRepaint(const QRegion &region)
 
 void Scene::addRepaint(RenderView *view, const QRegion &region)
 {
-    view->addRepaint(region.translated(-view->viewport().topLeft()));
+    // FIXME damage in logical coordinates may cause issues here
+    // if the viewport is on a non-integer position!
+    view->addRepaint(region.translated(-view->viewport().topLeft().toPoint()));
 }
 
 QRegion Scene::damage() const
