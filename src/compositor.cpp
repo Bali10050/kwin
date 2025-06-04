@@ -644,6 +644,7 @@ void Compositor::removeOutput(Output *output)
     }
     disconnect(output->renderLoop(), &RenderLoop::frameRequested, this, &Compositor::handleFrameRequested);
     m_primaryViews.erase(output->renderLoop());
+    m_cursorViews.erase(output->renderLoop());
 }
 
 std::pair<std::shared_ptr<GLTexture>, ColorDescription> Compositor::textureForOutput(Output *output) const
