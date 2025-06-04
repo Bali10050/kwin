@@ -43,6 +43,8 @@ public:
     virtual const ColorPipeline &colorPipeline() const = 0;
     virtual ColorDescription colorDescription() const = 0;
 
+    DrmPlane::TypeIndex type() const;
+
 protected:
     DrmPipeline *const m_pipeline;
     const DrmPlane::TypeIndex m_type;
