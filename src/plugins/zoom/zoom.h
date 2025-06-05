@@ -13,6 +13,7 @@
 
 #include "core/colorspace.h"
 #include "effect/effect.h"
+#include "effect/offscreenquickview.h"
 
 #include <QAction>
 #include <QTime>
@@ -33,14 +34,15 @@ class GLShader;
 class ZoomEffect : public Effect
 {
     Q_OBJECT
-    Q_PROPERTY(qreal zoomFactor READ configuredZoomFactor)
+    Q_PROPERTY(qreal zoomFactor READ configuredZoomFactor NOTIFY zoomFactorChanged)
+    Q_PROPERTY(qreal targetZoom READ targetZoom NOTIFY targetZoomChanged)
+
     Q_PROPERTY(int mousePointer READ configuredMousePointer)
     Q_PROPERTY(int mouseTracking READ configuredMouseTracking)
     Q_PROPERTY(bool focusTrackingEnabled READ isFocusTrackingEnabled)
     Q_PROPERTY(bool textCaretTrackingEnabled READ isTextCaretTrackingEnabled)
     Q_PROPERTY(int focusDelay READ configuredFocusDelay)
     Q_PROPERTY(qreal moveFactor READ configuredMoveFactor)
-    Q_PROPERTY(qreal targetZoom READ targetZoom)
 
 public:
     ZoomEffect();
@@ -62,6 +64,10 @@ public:
     int configuredFocusDelay() const;
     qreal configuredMoveFactor() const;
     qreal targetZoom() const;
+
+Q_SIGNALS:
+    void zoomFactorChanged();
+    void targetZoomChanged();
 
 private Q_SLOTS:
     void zoomIn();
@@ -147,6 +153,8 @@ private:
     Qt::KeyboardModifiers m_axisModifiers;
     std::unique_ptr<QAction> m_touchpadAction;
     double m_lastPinchProgress = 0;
+
+    std::unique_ptr<OffscreenQuickScene> m_overlay;
 };
 
 } // namespace

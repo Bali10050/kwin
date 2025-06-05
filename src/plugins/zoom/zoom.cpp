@@ -8,6 +8,8 @@
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 
+#include <QQuickItem>
+
 #include "zoom.h"
 #include "core/rendertarget.h"
 #include "core/renderviewport.h"
@@ -143,6 +145,15 @@ ZoomEffect::ZoomEffect()
     if (initialZoom > 1.0) {
         zoomTo(initialZoom);
     }
+
+    // TODO d_ed: OLIVER HERE, we probably want to scope this to only be when we're zooming
+    // but we're only painted when effect is active?
+    m_overlay = std::make_unique<OffscreenQuickScene>();
+    const auto url = QUrl::fromLocalFile(QStandardPaths::locate(QStandardPaths::GenericDataLocation, QStringLiteral("kwin-wayland/effects/zoom/qml/overlay.qml")));
+    m_overlay->setSource(url, {{QStringLiteral("effect"), QVariant::fromValue(this)}}); // so we we can expose zoom levels and whatnot
+    connect(m_overlay.get(), &OffscreenQuickScene::repaintNeeded, this, []() {
+        effects->addRepaintFull();
+    });
 }
 
 ZoomEffect::~ZoomEffect()
@@ -250,23 +261,32 @@ static Qt::KeyboardModifiers stringToKeyboardModifiers(const QString &string)
 void ZoomEffect::reconfigure(ReconfigureFlags)
 {
     ZoomConfig::self()->read();
+
     // On zoom-in and zoom-out change the zoom by the defined zoom-factor.
-    m_zoomFactor = std::max(0.1, ZoomConfig::zoomFactor());
+    m_zoomFactor = std::max(0.1, ZoomConfig::zoomFactor()); // TODO: Specify min/max in kcfg?
+    Q_EMIT zoomFactorChanged();
+
     m_pixelGridZoom = ZoomConfig::pixelGridZoom();
+
     // Visibility of the mouse-pointer.
     m_mousePointer = MousePointerType(ZoomConfig::mousePointer());
+
     // Track moving of the mouse.
     m_mouseTracking = MouseTrackingType(ZoomConfig::mouseTracking());
+
 #if HAVE_ACCESSIBILITY
     if (m_accessibilityIntegration) {
         // Enable tracking of the focused location.
         m_accessibilityIntegration->setFocusTrackingEnabled(ZoomConfig::enableFocusTracking());
+
         // Enable tracking of the text caret.
         m_accessibilityIntegration->setTextCaretTrackingEnabled(ZoomConfig::enableTextCaretTracking());
     }
 #endif
+
     // The time in milliseconds to wait before a focus-event takes away a mouse-move.
     m_focusDelay = std::max(uint(0), ZoomConfig::focusDelay());
+
     // The factor the zoom-area will be moved on touching an edge on push-mode or using the navigation KAction's.
     m_moveFactor = std::max(0.1, ZoomConfig::moveFactor());
 
@@ -491,6 +511,13 @@ void ZoomEffect::paintScreen(const RenderTarget &renderTarget, const RenderViewp
             ShaderManager::instance()->popShader();
             glDisable(GL_BLEND);
         }
+    }
+
+    // TODO: Connect? Have fn to update overlay geometry?
+    if (m_overlay->rootItem()) {
+        const qreal overlayMargins = m_overlay->rootItem()->property("margins").toReal();
+        m_overlay->setGeometry(QRect(overlayMargins, overlayMargins, m_overlay->rootItem()->implicitWidth(), m_overlay->rootItem()->implicitHeight()));
+        effects->renderOffscreenQuickView(renderTarget, viewport, m_overlay.get());
     }
 }
 
@@ -719,6 +746,7 @@ void ZoomEffect::setTargetZoom(double value)
         disconnect(effects, &EffectsHandler::mouseChanged, this, &ZoomEffect::slotMouseChanged);
     }
     m_targetZoom = value;
+    Q_EMIT targetZoomChanged();
     effects->addRepaintFull();
 }
 
