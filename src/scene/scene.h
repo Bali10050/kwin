@@ -107,6 +107,8 @@ public:
     void postPaint() override;
     void paint(const RenderTarget &renderTarget, const QRegion &region) override;
 
+    bool needsRepaint();
+    bool isVisible() const;
     bool canSkipMoveRepaint(Item *item) override;
 
 private:

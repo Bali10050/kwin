@@ -97,6 +97,9 @@ public:
      */
     OutputTransform bufferTransform() const;
 
+Q_SIGNALS:
+    void repaintScheduled();
+
 protected:
     virtual bool doImportScanoutBuffer(GraphicsBuffer *buffer, const ColorDescription &color, RenderingIntent intent, const std::shared_ptr<OutputFrame> &frame);
     virtual std::optional<OutputLayerBeginFrameInfo> doBeginFrame() = 0;
