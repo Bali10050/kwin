@@ -91,7 +91,8 @@ DrmPipeline::Error DrmPipeline::present(const QList<OutputLayer *> &layersToUpda
                 plane = m_pending.crtc->cursorPlane();
                 break;
             case DrmPlane::TypeIndex::Overlay:
-                Q_UNREACHABLE();
+                plane = m_pending.crtc->overlayPlane();
+                break;
             }
             if (Error err = prepareAtomicPlane(partialUpdate.get(), plane, pipelineLayer, frame); err != Error::None) {
                 return err;
@@ -202,7 +203,14 @@ DrmPipeline::Error DrmPipeline::prepareAtomicCommit(DrmAtomicCommit *commit, Com
             return err;
         }
         if (auto plane = m_pending.crtc->cursorPlane()) {
-            prepareAtomicPlane(commit, plane, m_cursorLayer.get(), frame);
+            if (Error err = prepareAtomicPlane(commit, plane, m_cursorLayer.get(), frame); err != Error::None) {
+                return err;
+            }
+        }
+        if (auto plane = m_pending.crtc->overlayPlane()) {
+            if (Error err = prepareAtomicPlane(commit, plane, m_overlayLayer.get(), frame); err != Error::None) {
+                return err;
+            }
         }
         if (mode == CommitMode::TestAllowModeset || mode == CommitMode::CommitModeset || m_pending.needsModesetProperties) {
             if (!prepareAtomicModeset(commit)) {
@@ -398,9 +406,6 @@ bool DrmPipeline::prepareAtomicModeset(DrmAtomicCommit *commit)
     if (primary->pixelBlendMode.isValid()) {
         commit->addEnum(primary->pixelBlendMode, DrmPlane::PixelBlendMode::PreMultiplied);
     }
-    if (const auto cursor = m_pending.crtc->cursorPlane()) {
-        prepareAtomicPlane(commit, cursor, m_cursorLayer.get(), nullptr);
-    }
     return true;
 }
 
@@ -521,7 +526,11 @@ QHash<uint32_t, QList<uint64_t>> DrmPipeline::formats(DrmPlane::TypeIndex planeT
             return legacyCursorFormats;
         }
     case DrmPlane::TypeIndex::Overlay:
-        return {};
+        if (m_pending.crtc && m_pending.crtc->overlayPlane()) {
+            return m_pending.crtc->overlayPlane()->formats();
+        } else {
+            return {};
+        }
     }
     Q_UNREACHABLE();
 }
@@ -542,7 +551,11 @@ QHash<uint32_t, QList<uint64_t>> DrmPipeline::asyncFormats(DrmPlane::TypeIndex p
             return legacyCursorFormats;
         }
     case DrmPlane::TypeIndex::Overlay:
-        return {};
+        if (m_pending.crtc && m_pending.crtc->overlayPlane()) {
+            return m_pending.crtc->overlayPlane()->tearingFormats();
+        } else {
+            return {};
+        }
     }
     Q_UNREACHABLE();
 }
@@ -645,6 +658,11 @@ DrmPipelineLayer *DrmPipeline::cursorLayer() const
     return m_cursorLayer.get();
 }
 
+DrmPipelineLayer *DrmPipeline::overlayLayer() const
+{
+    return m_overlayLayer.get();
+}
+
 PresentationMode DrmPipeline::presentationMode() const
 {
     return m_pending.presentationMode;
@@ -695,10 +713,11 @@ void DrmPipeline::setEnable(bool enable)
     m_pending.enabled = enable;
 }
 
-void DrmPipeline::setLayers(const std::shared_ptr<DrmPipelineLayer> &primaryLayer, const std::shared_ptr<DrmPipelineLayer> &cursorLayer)
+void DrmPipeline::setLayers(const std::shared_ptr<DrmPipelineLayer> &primaryLayer, const std::shared_ptr<DrmPipelineLayer> &cursorLayer, const std::shared_ptr<DrmPipelineLayer> &overlayLayer)
 {
     m_primaryLayer = primaryLayer;
     m_cursorLayer = cursorLayer;
+    m_overlayLayer = overlayLayer;
 }
 
 void DrmPipeline::setPresentationMode(PresentationMode mode)
