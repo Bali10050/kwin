@@ -249,7 +249,7 @@ DrmPipeline::Error DrmPipeline::prepareAtomicPlane(DrmAtomicCommit *commit, DrmP
         plane->disable(commit);
         return Error::None;
     }
-    if (!layer->checkTestBuffer()) {
+    if (!layer->currentBuffer() && !layer->preparePresentationTest()) {
         qCWarning(KWIN_DRM) << "Checking test buffer failed!";
         return Error::TestBufferFailed;
     }

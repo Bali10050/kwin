@@ -52,7 +52,7 @@ void DrmPipeline::forceLegacyModeset()
 
 DrmPipeline::Error DrmPipeline::legacyModeset()
 {
-    if (!m_primaryLayer->checkTestBuffer()) {
+    if (!m_primaryLayer->preparePresentationTest()) {
         return Error::TestBufferFailed;
     }
     const auto buffer = m_primaryLayer->currentBuffer();

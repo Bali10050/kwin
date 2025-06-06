@@ -68,6 +68,15 @@ QPointF RenderView::hotspot() const
     return QPointF{};
 }
 
+bool RenderView::isVisible() const
+{
+    return true;
+}
+
+void RenderView::setEnabled(bool enable)
+{
+}
+
 SceneView::SceneView(Scene *scene, Output *output, OutputLayer *layer)
     : RenderView(output, layer)
     , m_scene(scene)
@@ -89,6 +98,11 @@ QList<SurfaceItem *> SceneView::scanoutCandidates(ssize_t maxCount) const
 QRegion SceneView::prePaint()
 {
     return m_scene->prePaint(this);
+}
+
+QRegion SceneView::updatePrePaint()
+{
+    return m_scene->updatePrePaint();
 }
 
 void SceneView::postPaint()
@@ -153,6 +167,9 @@ ItemTreeView::ItemTreeView(SceneView *parentView, Item *item, Output *output, Ou
 
 ItemTreeView::~ItemTreeView()
 {
+    if (m_item) {
+        m_parentView->showItem(m_item);
+    }
     m_parentView->scene()->removeView(this);
 }
 
@@ -210,17 +227,28 @@ QRegion ItemTreeView::prePaint()
 {
     QRegion ret;
     accumulateRepaints(m_item, this, &ret);
-    return ret;
+    // FIXME this offset should really not be rounded
+    return ret.translated(-viewport().topLeft().toPoint());
+}
+
+QRegion ItemTreeView::updatePrePaint()
+{
+    QRegion ret;
+    accumulateRepaints(m_item, this, &ret);
+    // FIXME this offset should really not be rounded
+    return ret.translated(-viewport().topLeft().toPoint());
 }
 
 void ItemTreeView::paint(const RenderTarget &renderTarget, const QRegion &region)
 {
+    // TODO we're just translating damage back and forth. Pick one and stick with it!
+    const QRegion globalRegion = region == infiniteRegion() ? infiniteRegion() : region.translated(viewport().topLeft().toPoint());
     RenderViewport renderViewport(viewport(), m_output->scale(), renderTarget);
     auto renderer = m_item->scene()->renderer();
     renderer->beginFrame(renderTarget, renderViewport);
-    renderer->renderBackground(renderTarget, renderViewport, region);
+    renderer->renderBackground(renderTarget, renderViewport, globalRegion);
     WindowPaintData data;
-    renderer->renderItem(renderTarget, renderViewport, m_item, 0, region, data, {});
+    renderer->renderItem(renderTarget, renderViewport, m_item, 0, globalRegion, data, {});
     renderer->endFrame();
 }
 
@@ -269,6 +297,15 @@ bool ItemTreeView::canSkipMoveRepaint(Item *item)
 {
     // this could be more generic, but it's all we need for now
     return m_layer && item == m_item;
+}
+
+void ItemTreeView::setEnabled(bool enable)
+{
+    if (enable) {
+        m_parentView->hideItem(m_item);
+    } else {
+        m_parentView->showItem(m_item);
+    }
 }
 
 Scene::Scene(std::unique_ptr<ItemRenderer> &&renderer)

@@ -173,6 +173,11 @@ QHash<uint32_t, QList<uint64_t>> OutputLayer::supportedAsyncDrmFormats() const
     return supportedDrmFormats();
 }
 
+bool OutputLayer::preparePresentationTest()
+{
+    return true;
+}
+
 } // namespace KWin
 
 #include "moc_outputlayer.cpp"
