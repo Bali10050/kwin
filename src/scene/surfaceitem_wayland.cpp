@@ -47,15 +47,16 @@ SurfaceItemWayland::SurfaceItemWayland(SurfaceInterface *surface, Item *parent)
     connect(surface, &SurfaceInterface::bufferReleasePointChanged, this, &SurfaceItemWayland::handleReleasePointChanged);
     connect(surface, &SurfaceInterface::alphaMultiplierChanged, this, &SurfaceItemWayland::handleAlphaMultiplierChanged);
 
+    connect(surface, &SurfaceInterface::mapped,
+            this, &SurfaceItemWayland::handleSurfaceMappedChanged);
+    connect(surface, &SurfaceInterface::unmapped,
+            this, &SurfaceItemWayland::handleSurfaceMappedChanged);
+    setVisible(surface->isMapped());
+
     SubSurfaceInterface *subsurface = surface->subSurface();
     if (subsurface) {
-        connect(surface, &SurfaceInterface::mapped,
-                this, &SurfaceItemWayland::handleSubSurfaceMappedChanged);
-        connect(surface, &SurfaceInterface::unmapped,
-                this, &SurfaceItemWayland::handleSubSurfaceMappedChanged);
         connect(subsurface, &SubSurfaceInterface::positionChanged,
                 this, &SurfaceItemWayland::handleSubSurfacePositionChanged);
-        setVisible(surface->isMapped());
         setPosition(subsurface->position());
     }
 
@@ -158,7 +159,7 @@ void SurfaceItemWayland::handleSubSurfacePositionChanged()
     setPosition(m_surface->subSurface()->position());
 }
 
-void SurfaceItemWayland::handleSubSurfaceMappedChanged()
+void SurfaceItemWayland::handleSurfaceMappedChanged()
 {
     setVisible(m_surface->isMapped());
 }
@@ -235,7 +236,7 @@ void SurfaceItemWayland::handleFramePainted(Output *output, OutputFrame *frame, 
     m_surface->frameRendered(timestamp.count());
     if (frame) {
         // FIXME make frame always valid
-        if (auto feedback = m_surface->takePresentationFeedback(output)) {
+        if (auto feedback = m_surface->presentationFeedback(output)) {
             frame->addFeedback(std::move(feedback));
         }
     }
@@ -264,7 +265,19 @@ SurfaceItemXwayland::SurfaceItemXwayland(X11Window *window, Item *parent)
     : SurfaceItemWayland(window->surface(), parent)
     , m_window(window)
 {
-    connect(window, &X11Window::shapeChanged, this, &SurfaceItemXwayland::discardQuads);
+    connect(window, &X11Window::shapeChanged, this, &SurfaceItemXwayland::handleShapeChange);
+}
+
+void SurfaceItemXwayland::handleShapeChange()
+{
+    const auto newShape = m_window->shapeRegion();
+    QRegion newBufferShape;
+    for (const auto &rect : newShape) {
+        newBufferShape |= rect.toAlignedRect();
+    }
+    scheduleRepaint(newBufferShape.xored(m_previousBufferShape));
+    m_previousBufferShape = newBufferShape;
+    discardQuads();
 }
 
 QList<QRectF> SurfaceItemXwayland::shape() const

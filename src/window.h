@@ -14,7 +14,9 @@
 #include "effect/globals.h"
 #include "options.h"
 #include "rules.h"
+#include "scene/borderradius.h"
 #include "utils/common.h"
+#include "utils/gravity.h"
 
 #include <functional>
 #include <memory>
@@ -73,16 +75,16 @@ class KWIN_EXPORT Window : public QObject
     Q_OBJECT
 
     /**
-     * This property holds rectangle that the pixmap or buffer of this Window
+     * This property holds the rectangle that the pixmap or buffer of this Window
      * occupies on the screen. This rectangle includes invisible portions of the
      * window, e.g. client-side drop shadows, etc.
      */
-    Q_PROPERTY(QRectF bufferGeometry READ bufferGeometry)
+    Q_PROPERTY(QRectF bufferGeometry READ bufferGeometry NOTIFY bufferGeometryChanged)
 
     /**
      * The geometry of the Window without frame borders.
      */
-    Q_PROPERTY(QRectF clientGeometry READ clientGeometry)
+    Q_PROPERTY(QRectF clientGeometry READ clientGeometry NOTIFY clientGeometryChanged)
 
     /**
      * This property holds the position of the Window's frame geometry.
@@ -128,76 +130,76 @@ class KWIN_EXPORT Window : public QObject
 
     /**
      * Returns whether the window is a desktop background window (the one with wallpaper).
-     * See _NET_WM_WINDOW_TYPE_DESKTOP at https://standards.freedesktop.org/wm-spec/wm-spec-latest.html .
+     * See _NET_WM_WINDOW_TYPE_DESKTOP at https://specifications.freedesktop.org/wm-spec .
      */
     Q_PROPERTY(bool desktopWindow READ isDesktop CONSTANT)
 
     /**
      * Returns whether the window is a dock (i.e. a panel).
-     * See _NET_WM_WINDOW_TYPE_DOCK at https://standards.freedesktop.org/wm-spec/wm-spec-latest.html .
+     * See _NET_WM_WINDOW_TYPE_DOCK at https://specifications.freedesktop.org/wm-spec .
      */
     Q_PROPERTY(bool dock READ isDock CONSTANT)
 
     /**
      * Returns whether the window is a standalone (detached) toolbar window.
-     * See _NET_WM_WINDOW_TYPE_TOOLBAR at https://standards.freedesktop.org/wm-spec/wm-spec-latest.html .
+     * See _NET_WM_WINDOW_TYPE_TOOLBAR at https://specifications.freedesktop.org/wm-spec .
      */
     Q_PROPERTY(bool toolbar READ isToolbar CONSTANT)
 
     /**
      * Returns whether the window is a torn-off menu.
-     * See _NET_WM_WINDOW_TYPE_MENU at https://standards.freedesktop.org/wm-spec/wm-spec-latest.html .
+     * See _NET_WM_WINDOW_TYPE_MENU at https://specifications.freedesktop.org/wm-spec .
      */
     Q_PROPERTY(bool menu READ isMenu CONSTANT)
 
     /**
      * Returns whether the window is a "normal" window, i.e. an application or any other window
      * for which none of the specialized window types fit.
-     * See _NET_WM_WINDOW_TYPE_NORMAL at https://standards.freedesktop.org/wm-spec/wm-spec-latest.html .
+     * See _NET_WM_WINDOW_TYPE_NORMAL at https://specifications.freedesktop.org/wm-spec .
      */
     Q_PROPERTY(bool normalWindow READ isNormalWindow CONSTANT)
 
     /**
      * Returns whether the window is a dialog window.
-     * See _NET_WM_WINDOW_TYPE_DIALOG at https://standards.freedesktop.org/wm-spec/wm-spec-latest.html .
+     * See _NET_WM_WINDOW_TYPE_DIALOG at https://specifications.freedesktop.org/wm-spec .
      */
     Q_PROPERTY(bool dialog READ isDialog CONSTANT)
 
     /**
      * Returns whether the window is a splashscreen. Note that many (especially older) applications
      * do not support marking their splash windows with this type.
-     * See _NET_WM_WINDOW_TYPE_SPLASH at https://standards.freedesktop.org/wm-spec/wm-spec-latest.html .
+     * See _NET_WM_WINDOW_TYPE_SPLASH at https://specifications.freedesktop.org/wm-spec .
      */
     Q_PROPERTY(bool splash READ isSplash CONSTANT)
 
     /**
      * Returns whether the window is a utility window, such as a tool window.
-     * See _NET_WM_WINDOW_TYPE_UTILITY at https://standards.freedesktop.org/wm-spec/wm-spec-latest.html .
+     * See _NET_WM_WINDOW_TYPE_UTILITY at https://specifications.freedesktop.org/wm-spec .
      */
     Q_PROPERTY(bool utility READ isUtility CONSTANT)
 
     /**
      * Returns whether the window is a dropdown menu (i.e. a popup directly or indirectly open
-     * from the applications menubar).
-     * See _NET_WM_WINDOW_TYPE_DROPDOWN_MENU at https://standards.freedesktop.org/wm-spec/wm-spec-latest.html .
+     * from the application's menubar).
+     * See _NET_WM_WINDOW_TYPE_DROPDOWN_MENU at https://specifications.freedesktop.org/wm-spec .
      */
     Q_PROPERTY(bool dropdownMenu READ isDropdownMenu CONSTANT)
 
     /**
      * Returns whether the window is a popup menu (that is not a torn-off or dropdown menu).
-     * See _NET_WM_WINDOW_TYPE_POPUP_MENU at https://standards.freedesktop.org/wm-spec/wm-spec-latest.html .
+     * See _NET_WM_WINDOW_TYPE_POPUP_MENU at https://specifications.freedesktop.org/wm-spec .
      */
     Q_PROPERTY(bool popupMenu READ isPopupMenu CONSTANT)
 
     /**
      * Returns whether the window is a tooltip.
-     * See _NET_WM_WINDOW_TYPE_TOOLTIP at https://standards.freedesktop.org/wm-spec/wm-spec-latest.html .
+     * See _NET_WM_WINDOW_TYPE_TOOLTIP at https://specifications.freedesktop.org/wm-spec .
      */
     Q_PROPERTY(bool tooltip READ isTooltip CONSTANT)
 
     /**
      * Returns whether the window is a window with a notification.
-     * See _NET_WM_WINDOW_TYPE_NOTIFICATION at https://standards.freedesktop.org/wm-spec/wm-spec-latest.html .
+     * See _NET_WM_WINDOW_TYPE_NOTIFICATION at https://specifications.freedesktop.org/wm-spec .
      */
     Q_PROPERTY(bool notification READ isNotification CONSTANT)
 
@@ -218,19 +220,19 @@ class KWIN_EXPORT Window : public QObject
 
     /**
      * Returns whether the window is a combobox popup.
-     * See _NET_WM_WINDOW_TYPE_COMBO at https://standards.freedesktop.org/wm-spec/wm-spec-latest.html .
+     * See _NET_WM_WINDOW_TYPE_COMBO at https://specifications.freedesktop.org/wm-spec .
      */
     Q_PROPERTY(bool comboBox READ isComboBox CONSTANT)
 
     /**
      * Returns whether the window is a Drag&Drop icon.
-     * See _NET_WM_WINDOW_TYPE_DND at https://standards.freedesktop.org/wm-spec/wm-spec-latest.html .
+     * See _NET_WM_WINDOW_TYPE_DND at https://specifications.freedesktop.org/wm-spec .
      */
     Q_PROPERTY(bool dndIcon READ isDNDIcon CONSTANT)
 
     /**
-     * Returns the NETWM window type
-     * See https://standards.freedesktop.org/wm-spec/wm-spec-latest.html .
+     * Returns the NETWM window type.
+     * See https://specifications.freedesktop.org/wm-spec .
      */
     Q_PROPERTY(WindowType windowType READ windowType CONSTANT)
 
@@ -247,7 +249,7 @@ class KWIN_EXPORT Window : public QObject
 
     /**
      * Whether the window does not want to be animated on window close.
-     * There are legit reasons for this like a screenshot application which does not want it's
+     * There are legit reasons for this like a screenshot application which does not want its
      * window being captured.
      */
     Q_PROPERTY(bool skipsCloseAnimation READ skipsCloseAnimation WRITE setSkipCloseAnimation NOTIFY skipCloseAnimationChanged)
@@ -348,17 +350,6 @@ class KWIN_EXPORT Window : public QObject
     Q_PROPERTY(bool keepBelow READ keepBelow WRITE setKeepBelow NOTIFY keepBelowChanged)
 
     /**
-     * Whether the Window can be shaded. The property is evaluated each time it is invoked.
-     * Because of that there is no notify signal.
-     */
-    Q_PROPERTY(bool shadeable READ isShadeable NOTIFY shadeableChanged)
-
-    /**
-     * Whether the Window is shaded.
-     */
-    Q_PROPERTY(bool shade READ isShade WRITE setShade NOTIFY shadeChanged)
-
-    /**
      * Whether the Window can be minimized. The property is evaluated each time it is invoked.
      * Because of that there is no notify signal.
      */
@@ -371,7 +362,7 @@ class KWIN_EXPORT Window : public QObject
 
     /**
      * The optional geometry representing the minimized Window in e.g a taskbar.
-     * See _NET_WM_ICON_GEOMETRY at https://standards.freedesktop.org/wm-spec/wm-spec-latest.html .
+     * See _NET_WM_ICON_GEOMETRY at https://specifications.freedesktop.org/wm-spec .
      * The value is evaluated each time the getter is called.
      * Because of that no changed signal is provided.
      */
@@ -546,7 +537,7 @@ class KWIN_EXPORT Window : public QObject
      * The color scheme set on this window
      * Absolute file path, or name of palette in the user's config directory following KColorSchemes format.
      * An empty string indicates the default palette from kdeglobals is used.
-     * @note this indicates the colour scheme requested, which might differ from the theme applied if the colorScheme cannot be found
+     * @note This indicates the colour scheme requested, which might differ from the theme applied if the colorScheme cannot be found
      */
     Q_PROPERTY(QString colorScheme READ colorScheme NOTIFY colorSchemeChanged)
 
@@ -563,7 +554,7 @@ class KWIN_EXPORT Window : public QObject
     Q_PROPERTY(KWin::Tile *tile READ requestedTile WRITE setTileCompatibility NOTIFY tileChanged)
 
     /**
-     * Returns whether this window is a input method window.
+     * Returns whether this window is an input method window.
      * This is only used for Wayland.
      */
     Q_PROPERTY(bool inputMethod READ isInputMethod)
@@ -629,6 +620,9 @@ public:
      * the window doesn't have a server-side decoration.
      */
     QMargins frameMargins() const;
+
+    BorderRadius borderRadius() const;
+    void setBorderRadius(const BorderRadius &radius);
 
     virtual QSizeF minSize() const;
     virtual QSizeF maxSize() const;
@@ -781,6 +775,7 @@ public:
     virtual bool isClient() const;
     bool isDeleted() const;
     virtual bool isUnmanaged() const;
+    virtual bool isPictureInPicture() const;
 
     bool isLockScreenOverlay() const;
     void setLockScreenOverlay(bool allowed);
@@ -806,7 +801,7 @@ public:
     void blockActivityUpdates(bool b = true);
 
     /**
-     * Refresh Window's cache of activites
+     * Refresh Window's cache of activities
      * Called when activity daemon status changes
      */
     virtual void checkActivities(){};
@@ -828,11 +823,6 @@ public:
     const EffectWindow *effectWindow() const;
     SurfaceItem *surfaceItem() const;
     WindowItem *windowItem() const;
-    /**
-     * Window will be temporarily painted as if being at the top of the stack.
-     * Only available if Compositor is active, if not active, this method is a no-op.
-     */
-    void elevate(bool elevate);
 
     /**
      * Returns the Shadow associated with this Window or @c null if it has no shadow.
@@ -1082,23 +1072,6 @@ public:
      */
     virtual bool isMovableAcrossScreens() const = 0;
 
-    /**
-     * Returns @c true if the window is shaded and shadeMode is @c ShadeNormal; otherwise returns @c false.
-     */
-    bool isShade() const
-    {
-        return shadeMode() == ShadeNormal;
-    }
-    ShadeMode shadeMode() const; // Prefer isShade()
-    void setShade(bool set);
-    void setShade(ShadeMode mode);
-    void toggleShade();
-    void cancelShadeHoverTimer();
-    /**
-     * Whether the Window can be shaded. Default implementation returns @c false.
-     */
-    virtual bool isShadeable() const;
-
     const WindowRules *rules() const
     {
         return &m_rules;
@@ -1258,7 +1231,7 @@ public:
     QRectF virtualKeyboardGeometry() const;
 
     /**
-     * Sets the geometry of the virtual keyboard, The window may resize itself in order to make space for the keybaord
+     * Sets the geometry of the virtual keyboard, The window may resize itself in order to make space for the keyboard
      * This geometry is in global coordinates
      */
     virtual void setVirtualKeyboardGeometry(const QRectF &geo);
@@ -1363,6 +1336,8 @@ public:
 
     /**
      * Sets the last user usage serial of the surface as @p serial
+     * TODO make the QPA responsible for this, it's only needed
+     * for KWindowSystem / for internal windows
      */
     void setLastUsageSerial(quint32 serial);
     quint32 lastUsageSerial() const;
@@ -1378,11 +1353,14 @@ public:
     OutputTransform preferredBufferTransform() const;
     void setPreferredBufferTransform(OutputTransform transform);
 
-    const ColorDescription &preferredColorDescription() const;
-    void setPreferredColorDescription(const ColorDescription &description);
+    const std::shared_ptr<ColorDescription> &preferredColorDescription() const;
+    void setPreferredColorDescription(const std::shared_ptr<ColorDescription> &description);
 
     QString tag() const;
     QString description() const;
+
+    void setActivationToken(const QString &token);
+    QString activationToken() const;
 
 public Q_SLOTS:
     virtual void closeWindow() = 0;
@@ -1392,7 +1370,6 @@ protected Q_SLOTS:
 
 Q_SIGNALS:
     void stackingOrderChanged();
-    void shadeChanged();
     void opacityChanged(KWin::Window *window, qreal oldOpacity);
     void damaged(KWin::Window *window);
     void inputTransformationChanged();
@@ -1440,7 +1417,7 @@ Q_SIGNALS:
     void clientGeometryChanged(const QRectF &oldGeometry);
 
     /**
-     * This signal is emitted when the frame geometry is about to change. the new geometry is not known yet
+     * This signal is emitted when the frame geometry is about to change. The new geometry is not known yet
      */
     void frameGeometryAboutToChange();
 
@@ -1486,7 +1463,6 @@ Q_SIGNALS:
     void interactiveMoveResizeFinished();
     void closeableChanged(bool);
     void minimizeableChanged(bool);
-    void shadeableChanged(bool);
     void maximizeableChanged(bool);
     void desktopFileNameChanged();
     void applicationMenuChanged();
@@ -1506,6 +1482,7 @@ Q_SIGNALS:
     void noBorderChanged();
     void tagChanged();
     void descriptionChanged();
+    void borderRadiusChanged();
 
 protected:
     Window();
@@ -1546,13 +1523,6 @@ protected:
      * Default implementation does nothing.
      */
     virtual void doSetKeepBelow();
-    /**
-     * Called from setShade() once the shadeMode value got updated, but before the changed signal
-     * is emitted.
-     *
-     * Default implementation does nothing.
-     */
-    virtual void doSetShade(ShadeMode previousShadeMode);
     /**
      * Called from setDeskop once the desktop value got updated, but before the changed signal
      * is emitted.
@@ -1762,6 +1732,7 @@ protected:
     void startDecorationDoubleClickTimer();
     void invalidateDecorationDoubleClickTimer();
     void updateDecorationInputShape();
+    void updateDecorationBorderRadius();
 
     void setDesktopFileName(const QString &name);
     QString iconFromDesktopFile() const;
@@ -1774,11 +1745,6 @@ protected:
     virtual void setShortcutInternal();
     QString shortcutCaptionSuffix() const;
     virtual void updateCaption() = 0;
-
-    void startShadeHoverTimer();
-    void startShadeUnhoverTimer();
-    void shadeHover();
-    void shadeUnhover();
 
     // The geometry that the window should be restored when the virtual keyboard closes
     QRectF keyboardGeometryRestore() const;
@@ -1805,10 +1771,12 @@ protected:
     bool m_hidden = false;
     bool m_hiddenByShowDesktop = false;
 
+    BorderRadius m_borderRadius;
+
     qreal m_nextTargetScale = 1;
     qreal m_targetScale = 1;
     OutputTransform m_preferredBufferTransform = OutputTransform::Normal;
-    ColorDescription m_preferredColorDescription = ColorDescription::sRGB;
+    std::shared_ptr<ColorDescription> m_preferredColorDescription = ColorDescription::sRGB;
 
     int m_refCount = 1;
     QUuid m_internalId;
@@ -1839,8 +1807,6 @@ protected:
     bool m_minimized = false;
     bool m_suspended = false;
     QTimer *m_autoRaiseTimer = nullptr;
-    QTimer *m_shadeHoverTimer = nullptr;
-    ShadeMode m_shadeMode = ShadeNone;
     QList<VirtualDesktop *> m_desktops;
 
     QStringList m_activityList;
@@ -1919,6 +1885,8 @@ protected:
 
     QString m_tag;
     QString m_description;
+
+    QString m_activationToken;
 };
 
 inline QRectF Window::bufferGeometry() const
@@ -2082,6 +2050,11 @@ inline bool Window::isOutline() const
 }
 
 inline bool Window::isInternal() const
+{
+    return false;
+}
+
+inline bool Window::isPictureInPicture() const
 {
     return false;
 }

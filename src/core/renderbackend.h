@@ -76,7 +76,7 @@ public:
 
     void presented(std::chrono::nanoseconds timestamp, PresentationMode mode);
 
-    void addFeedback(std::unique_ptr<PresentationFeedback> &&feedback);
+    void addFeedback(std::shared_ptr<PresentationFeedback> &&feedback);
 
     void setContentType(ContentType type);
     std::optional<ContentType> contentType() const;
@@ -84,8 +84,6 @@ public:
     void setPresentationMode(PresentationMode mode);
     PresentationMode presentationMode() const;
 
-    void setDamage(const QRegion &region);
-    QRegion damage() const;
     void addRenderTimeQuery(std::unique_ptr<RenderTimeQuery> &&query);
 
     std::chrono::steady_clock::time_point targetPageflipTime() const;
@@ -105,10 +103,9 @@ private:
     const std::chrono::nanoseconds m_refreshDuration;
     const std::chrono::steady_clock::time_point m_targetPageflipTime;
     const std::chrono::nanoseconds m_predictedRenderTime;
-    std::vector<std::unique_ptr<PresentationFeedback>> m_feedbacks;
+    std::vector<std::shared_ptr<PresentationFeedback>> m_feedbacks;
     std::optional<ContentType> m_contentType;
     PresentationMode m_presentationMode = PresentationMode::VSync;
-    QRegion m_damage;
     std::vector<std::unique_ptr<RenderTimeQuery>> m_renderTimeQueries;
     bool m_presented = false;
     std::optional<double> m_brightness;
@@ -127,8 +124,7 @@ public:
 
     virtual bool checkGraphicsReset();
 
-    virtual OutputLayer *primaryLayer(Output *output) = 0;
-    virtual OutputLayer *cursorLayer(Output *output);
+    virtual QList<OutputLayer *> compatibleOutputLayers(Output *output) = 0;
 
     virtual DrmDevice *drmDevice() const;
 

@@ -55,6 +55,14 @@ enum PlacementPolicy {
     PlacementMaximizing,
 };
 
+enum class FocusStealingPreventionLevel {
+    None = 0,
+    Low = 1,
+    Medium = 2,
+    High = 3,
+    Extreme = 4,
+};
+
 class Settings;
 
 class KWIN_EXPORT Options : public QObject
@@ -83,14 +91,6 @@ class KWIN_EXPORT Options : public QObject
      * Delayed focus interval.
      */
     Q_PROPERTY(int delayFocusInterval READ delayFocusInterval WRITE setDelayFocusInterval NOTIFY delayFocusIntervalChanged)
-    /**
-     * Whether shade hover is enabled or not.
-     */
-    Q_PROPERTY(bool shadeHover READ isShadeHover WRITE setShadeHover NOTIFY shadeHoverChanged)
-    /**
-     * Shade hover interval.
-     */
-    Q_PROPERTY(int shadeHoverInterval READ shadeHoverInterval WRITE setShadeHoverInterval NOTIFY shadeHoverIntervalChanged)
     /**
      * Whether to see Xinerama screens separately for focus (in Alt+Tab, when activating next client)
      */
@@ -129,7 +129,7 @@ class KWIN_EXPORT Options : public QObject
     /**
      * 0 - 4 , see Workspace::allowWindowActivation()
      */
-    Q_PROPERTY(int focusStealingPreventionLevel READ focusStealingPreventionLevel WRITE setFocusStealingPreventionLevel NOTIFY focusStealingPreventionLevelChanged)
+    Q_PROPERTY(KWin::FocusStealingPreventionLevel focusStealingPreventionLevel READ focusStealingPreventionLevel WRITE setFocusStealingPreventionLevel NOTIFY focusStealingPreventionLevelChanged)
     Q_PROPERTY(KWin::Options::WindowOperation operationTitlebarDblClick READ operationTitlebarDblClick WRITE setOperationTitlebarDblClick NOTIFY operationTitlebarDblClickChanged)
     Q_PROPERTY(KWin::Options::WindowOperation operationMaxButtonLeftClick READ operationMaxButtonLeftClick WRITE setOperationMaxButtonLeftClick NOTIFY operationMaxButtonLeftClickChanged)
     Q_PROPERTY(KWin::Options::WindowOperation operationMaxButtonMiddleClick READ operationMaxButtonMiddleClick WRITE setOperationMaxButtonMiddleClick NOTIFY operationMaxButtonMiddleClickChanged)
@@ -178,6 +178,9 @@ class KWIN_EXPORT Options : public QObject
      */
     Q_PROPERTY(bool allowTearing READ allowTearing WRITE setAllowTearing NOTIFY allowTearingChanged)
     Q_PROPERTY(bool interactiveWindowMoveEnabled READ interactiveWindowMoveEnabled WRITE setInteractiveWindowMoveEnabled NOTIFY interactiveWindowMoveEnabledChanged)
+    Q_PROPERTY(Qt::Corner pictureInPictureHomeCorner READ pictureInPictureHomeCorner WRITE setPictureInPictureHomeCorner NOTIFY pictureInPictureHomeCornerChanged)
+    Q_PROPERTY(int pictureInPictureMargin READ pictureInPictureMargin WRITE setPictureInPictureMargin NOTIFY pictureInPictureMarginChanged)
+    Q_PROPERTY(bool overlayVirtualKeyboardOnWindows READ overlayVirtualKeyboardOnWindows WRITE setOverlayVirtualKeyboardOnWindows NOTIFY overlayVirtualKeyboardOnWindowsChanged)
 public:
     explicit Options(QObject *parent = nullptr);
     ~Options() override;
@@ -188,7 +191,7 @@ public:
      * This enum type is used to specify the focus policy.
      *
      * Note that FocusUnderMouse and FocusStrictlyUnderMouse are not
-     * particulary useful. They are only provided for old-fashined
+     * particularly useful. They are only provided for old-fashined
      * die-hard UNIX people ;-)
      */
     enum FocusPolicy {
@@ -206,7 +209,7 @@ public:
          * The window that happens to be under the mouse pointer becomes active.
          * The invariant is: no window can have focus that is not under the mouse.
          * This also means that Alt-Tab won't work properly and popup dialogs are
-         * usually unsable with the keyboard. Note that the desktop and windows on
+         * usually unusable with the keyboard. Note that the desktop and windows on
          * the dock are excluded for convenience. They get focus only when clicking
          * on it.
          */
@@ -282,22 +285,6 @@ public:
     int delayFocusInterval() const
     {
         return m_delayFocusInterval;
-    }
-
-    /**
-     * Whether shade hover is enabled or not.
-     */
-    bool isShadeHover() const
-    {
-        return m_shadeHover;
-    }
-
-    /**
-     * Shade hover interval.
-     */
-    int shadeHoverInterval()
-    {
-        return m_shadeHoverInterval;
     }
 
     /**
@@ -391,7 +378,7 @@ public:
      *
      * @see allowWindowActivation
      */
-    int focusStealingPreventionLevel() const
+    FocusStealingPreventionLevel focusStealingPreventionLevel() const
     {
         return m_focusStealingPreventionLevel;
     }
@@ -406,10 +393,8 @@ public:
         UnrestrictedResizeOp,
         CloseOp,
         OnAllDesktopsOp,
-        ShadeOp,
         KeepAboveOp,
         KeepBelowOp,
-        OperationsOp,
         WindowRulesOp,
         ToggleStoreSettingsOp = WindowRulesOp, ///< @obsolete
         HMaximizeOp,
@@ -462,9 +447,6 @@ public:
         MouseActivateRaiseAndUnrestrictedMove,
         MouseResize,
         MouseUnrestrictedResize,
-        MouseShade,
-        MouseSetShade,
-        MouseUnsetShade,
         MouseMaximize,
         MouseRestore,
         MouseMinimize,
@@ -482,7 +464,6 @@ public:
 
     enum MouseWheelCommand {
         MouseWheelRaiseLower,
-        MouseWheelShadeUnshade,
         MouseWheelMaximizeRestore,
         MouseWheelAboveBelow,
         MouseWheelPreviousNextDesktop,
@@ -634,6 +615,13 @@ public:
 
     bool allowTearing() const;
     bool interactiveWindowMoveEnabled() const;
+    bool overlayVirtualKeyboardOnWindows() const;
+
+    Qt::Corner pictureInPictureHomeCorner() const;
+    void setPictureInPictureHomeCorner(Qt::Corner corner);
+
+    int pictureInPictureMargin() const;
+    void setPictureInPictureMargin(int margin);
 
     // setters
     void setFocusPolicy(FocusPolicy focusPolicy);
@@ -647,8 +635,6 @@ public:
     void setAutoRaise(bool autoRaise);
     void setAutoRaiseInterval(int autoRaiseInterval);
     void setDelayFocusInterval(int delayFocusInterval);
-    void setShadeHover(bool shadeHover);
-    void setShadeHoverInterval(int shadeHoverInterval);
     void setSeparateScreenFocus(bool separateScreenFocus);
     void setPlacement(PlacementPolicy placement);
     void setActivationDesktopPolicy(ActivationDesktopPolicy activationDesktopPolicy);
@@ -659,7 +645,7 @@ public:
     void setEdgeBarrier(int edgeBarrier);
     void setCornerBarrier(bool cornerBarrier);
     void setRollOverDesktops(bool rollOverDesktops);
-    void setFocusStealingPreventionLevel(int focusStealingPreventionLevel);
+    void setFocusStealingPreventionLevel(FocusStealingPreventionLevel focusStealingPreventionLevel);
     void setOperationTitlebarDblClick(WindowOperation operationTitlebarDblClick);
     void setOperationMaxButtonLeftClick(WindowOperation op);
     void setOperationMaxButtonRightClick(WindowOperation op);
@@ -688,6 +674,7 @@ public:
     void setCompositingMode(int compositingMode);
     void setAllowTearing(bool allow);
     void setInteractiveWindowMoveEnabled(bool set);
+    void setOverlayVirtualKeyboardOnWindows(bool overlay);
 
     // default values
     static WindowOperation defaultOperationTitlebarDblClick()
@@ -819,8 +806,6 @@ Q_SIGNALS:
     void autoRaiseChanged();
     void autoRaiseIntervalChanged();
     void delayFocusIntervalChanged();
-    void shadeHoverChanged();
-    void shadeHoverIntervalChanged();
     void separateScreenFocusChanged(bool);
     void placementChanged();
     void activationDesktopPolicyChanged();
@@ -862,6 +847,9 @@ Q_SIGNALS:
     void configChanged();
     void allowTearingChanged();
     void interactiveWindowMoveEnabledChanged();
+    void pictureInPictureHomeCornerChanged();
+    void pictureInPictureMarginChanged();
+    void overlayVirtualKeyboardOnWindowsChanged();
 
 private:
     void setElectricBorders(int borders);
@@ -875,8 +863,6 @@ private:
     bool m_autoRaise;
     int m_autoRaiseInterval;
     int m_delayFocusInterval;
-    bool m_shadeHover;
-    int m_shadeHoverInterval;
     bool m_separateScreenFocus;
     PlacementPolicy m_placement;
     ActivationDesktopPolicy m_activationDesktopPolicy;
@@ -887,7 +873,7 @@ private:
     int m_edgeBarrier;
     bool m_cornerBarrier;
     bool m_rollOverDesktops;
-    int m_focusStealingPreventionLevel;
+    FocusStealingPreventionLevel m_focusStealingPreventionLevel;
     int m_killPingTimeout;
     XwaylandCrashPolicy m_xwaylandCrashPolicy;
     int m_xwaylandMaxCrashCount;
@@ -927,7 +913,11 @@ private:
 
     bool m_allowTearing = true;
     bool m_interactiveWindowMoveEnabled = true;
+    bool m_overlayVirtualKeyboardOnWindows = false;
     bool m_doubleClickBorderToMaximize = true;
+
+    Qt::Corner m_pictureInPictureHomeCorner = Qt::BottomRightCorner;
+    int m_pictureInPictureMargin = 20;
 
     MouseCommand wheelToMouseCommand(MouseWheelCommand com, qreal delta) const;
 };

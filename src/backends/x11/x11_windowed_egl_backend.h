@@ -32,8 +32,7 @@ public:
     bool doEndFrame(const QRegion &renderedRegion, const QRegion &damagedRegion, OutputFrame *frame) override;
     DrmDevice *scanoutDevice() const override;
     QHash<uint32_t, QList<uint64_t>> supportedDrmFormats() const override;
-
-    std::shared_ptr<GLTexture> texture() const;
+    void releaseBuffers() override;
 
 private:
     std::shared_ptr<EglSwapchain> m_swapchain;
@@ -55,6 +54,7 @@ public:
     bool doEndFrame(const QRegion &renderedRegion, const QRegion &damagedRegion, OutputFrame *frame) override;
     DrmDevice *scanoutDevice() const override;
     QHash<uint32_t, QList<uint64_t>> supportedDrmFormats() const override;
+    void releaseBuffers() override;
 
 private:
     X11WindowedEglBackend *const m_backend;
@@ -77,23 +77,14 @@ public:
     X11WindowedBackend *backend() const;
     DrmDevice *drmDevice() const override;
 
-    std::pair<std::shared_ptr<GLTexture>, ColorDescription> textureForOutput(Output *output) const override;
     void init() override;
     void endFrame(Output *output, const QRegion &renderedRegion, const QRegion &damagedRegion);
-    OutputLayer *primaryLayer(Output *output) override;
-    OutputLayer *cursorLayer(Output *output) override;
+    QList<OutputLayer *> compatibleOutputLayers(Output *output) override;
 
 private:
     bool initializeEgl();
     bool initRenderingContext();
 
-    struct Layers
-    {
-        std::unique_ptr<X11WindowedEglPrimaryLayer> primaryLayer;
-        std::unique_ptr<X11WindowedEglCursorLayer> cursorLayer;
-    };
-
-    std::map<Output *, Layers> m_outputs;
     X11WindowedBackend *m_backend;
 };
 

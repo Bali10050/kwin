@@ -65,7 +65,7 @@ private:
     QModelIndex indexForProperty(int row, int column, const QModelIndex &parent, T *(DebugConsoleModel::*filter)(const QModelIndex &) const) const;
     template<class T>
     int propertyCount(const QModelIndex &parent, T *(DebugConsoleModel::*filter)(const QModelIndex &) const) const;
-    QVariant propertyData(QObject *object, const QModelIndex &index, int role) const;
+    QVariant propertyData(Window *object, const QModelIndex &index, int role) const;
     template<class T>
     QVariant windowData(const QModelIndex &index, int role, const QList<T *> windows, const std::function<QString(T *)> &toString) const;
     template<class T>
@@ -122,19 +122,23 @@ public:
     void pointerButton(PointerButtonEvent *event) override;
     void pointerAxis(PointerAxisEvent *event) override;
     void keyboardKey(KeyboardKeyEvent *event) override;
-    void touchDown(qint32 id, const QPointF &pos, std::chrono::microseconds time) override;
-    void touchMotion(qint32 id, const QPointF &pos, std::chrono::microseconds time) override;
-    void touchUp(qint32 id, std::chrono::microseconds time) override;
+    void touchDown(TouchDownEvent *event) override;
+    void touchMotion(TouchMotionEvent *event) override;
+    void touchUp(TouchUpEvent *event) override;
 
-    void pinchGestureBegin(int fingerCount, std::chrono::microseconds time) override;
-    void pinchGestureUpdate(qreal scale, qreal angleDelta, const QPointF &delta, std::chrono::microseconds time) override;
-    void pinchGestureEnd(std::chrono::microseconds time) override;
-    void pinchGestureCancelled(std::chrono::microseconds time) override;
+    void pinchGestureBegin(PointerPinchGestureBeginEvent *event) override;
+    void pinchGestureUpdate(PointerPinchGestureUpdateEvent *event) override;
+    void pinchGestureEnd(PointerPinchGestureEndEvent *event) override;
+    void pinchGestureCancelled(PointerPinchGestureCancelEvent *event) override;
 
-    void swipeGestureBegin(int fingerCount, std::chrono::microseconds time) override;
-    void swipeGestureUpdate(const QPointF &delta, std::chrono::microseconds time) override;
-    void swipeGestureEnd(std::chrono::microseconds time) override;
-    void swipeGestureCancelled(std::chrono::microseconds time) override;
+    void swipeGestureBegin(PointerSwipeGestureBeginEvent *event) override;
+    void swipeGestureUpdate(PointerSwipeGestureUpdateEvent *event) override;
+    void swipeGestureEnd(PointerSwipeGestureEndEvent *event) override;
+    void swipeGestureCancelled(PointerSwipeGestureCancelEvent *event) override;
+
+    void holdGestureBegin(PointerHoldGestureBeginEvent *event) override;
+    void holdGestureEnd(PointerHoldGestureEndEvent *event) override;
+    void holdGestureCancelled(PointerHoldGestureCancelEvent *event) override;
 
     void switchEvent(SwitchEvent *event) override;
 

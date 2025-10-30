@@ -21,6 +21,7 @@
 #include "wayland_logging.h"
 #include "wayland_output.h"
 
+#include <KWayland/Client/subsurface.h>
 #include <KWayland/Client/surface.h>
 
 #include <cmath>
@@ -35,38 +36,39 @@ namespace Wayland
 
 static const bool bufferAgeEnabled = qEnvironmentVariable("KWIN_USE_BUFFER_AGE") != QStringLiteral("0");
 
-WaylandEglPrimaryLayer::WaylandEglPrimaryLayer(WaylandOutput *output, WaylandEglBackend *backend)
-    : OutputLayer(output)
+WaylandEglLayer::WaylandEglLayer(WaylandOutput *output, WaylandEglBackend *backend, OutputLayerType type, int zpos)
+    : WaylandLayer(output, type, zpos)
     , m_backend(backend)
 {
 }
 
-WaylandEglPrimaryLayer::~WaylandEglPrimaryLayer()
+WaylandEglLayer::~WaylandEglLayer()
 {
 }
 
-GLFramebuffer *WaylandEglPrimaryLayer::fbo() const
+GLFramebuffer *WaylandEglLayer::fbo() const
 {
     return m_buffer->framebuffer();
 }
 
-std::shared_ptr<GLTexture> WaylandEglPrimaryLayer::texture() const
-{
-    return m_buffer->texture();
-}
-
-std::optional<OutputLayerBeginFrameInfo> WaylandEglPrimaryLayer::doBeginFrame()
+std::optional<OutputLayerBeginFrameInfo> WaylandEglLayer::doBeginFrame()
 {
     if (!m_backend->openglContext()->makeCurrent()) {
         qCCritical(KWIN_WAYLAND_BACKEND) << "Make Context Current failed";
         return std::nullopt;
     }
 
-    const QSize nativeSize = m_output->modeSize();
+    if (m_color != m_previousColor) {
+        // need to force a full repaint
+        m_damageJournal.clear();
+    }
+
+    const QSize nativeSize = targetRect().size();
     if (!m_swapchain || m_swapchain->size() != nativeSize) {
         const QHash<uint32_t, QList<uint64_t>> formatTable = m_backend->backend()->display()->linuxDmabuf()->formats();
-        for (const uint32_t &candidateFormat : {DRM_FORMAT_XRGB2101010, DRM_FORMAT_XRGB8888}) {
-            auto it = formatTable.constFind(candidateFormat);
+        const auto suitableFormats = filterAndSortFormats(formatTable, m_requiredAlphaBits, m_output->colorPowerTradeoff());
+        for (const auto &candidate : suitableFormats) {
+            auto it = formatTable.constFind(candidate.drmFormat);
             if (it == formatTable.constEnd()) {
                 continue;
             }
@@ -90,12 +92,12 @@ std::optional<OutputLayerBeginFrameInfo> WaylandEglPrimaryLayer::doBeginFrame()
     m_query = std::make_unique<GLRenderTimeQuery>(m_backend->openglContextRef());
     m_query->begin();
     return OutputLayerBeginFrameInfo{
-        .renderTarget = RenderTarget(m_buffer->framebuffer(), m_output->colorDescription()),
+        .renderTarget = RenderTarget(m_buffer->framebuffer(), m_color),
         .repaint = repair,
     };
 }
 
-bool WaylandEglPrimaryLayer::doEndFrame(const QRegion &renderedRegion, const QRegion &damagedRegion, OutputFrame *frame)
+bool WaylandEglLayer::doEndFrame(const QRegion &renderedRegion, const QRegion &damagedRegion, OutputFrame *frame)
 {
     m_query->end();
     frame->addRenderTimeQuery(std::move(m_query));
@@ -103,41 +105,44 @@ bool WaylandEglPrimaryLayer::doEndFrame(const QRegion &renderedRegion, const QRe
     glFlush();
     EGLNativeFence releaseFence{m_backend->eglDisplayObject()};
 
-    static_cast<WaylandOutput *>(m_output)->setPrimaryBuffer(m_backend->backend()->importBuffer(m_buffer->buffer()));
+    setBuffer(m_backend->backend()->importBuffer(m_buffer->buffer()), damagedRegion);
     m_swapchain->release(m_buffer, releaseFence.takeFileDescriptor());
 
     m_damageJournal.add(damagedRegion);
     return true;
 }
 
-bool WaylandEglPrimaryLayer::doImportScanoutBuffer(GraphicsBuffer *buffer, const ColorDescription &color, RenderingIntent intent, const std::shared_ptr<OutputFrame> &frame)
+bool WaylandEglLayer::importScanoutBuffer(GraphicsBuffer *buffer, const std::shared_ptr<OutputFrame> &frame)
 {
-    // TODO use viewporter to relax this check
-    if (sourceRect() != targetRect() || targetRect() != QRectF(QPointF(0, 0), m_output->modeSize())) {
-        return false;
-    }
-    if (offloadTransform() != OutputTransform::Kind::Normal || color != ColorDescription::sRGB) {
+    if (!test()) {
         return false;
     }
     auto presentationBuffer = m_backend->backend()->importBuffer(buffer);
-    if (presentationBuffer) {
-        static_cast<WaylandOutput *>(m_output)->setPrimaryBuffer(presentationBuffer);
+    if (!presentationBuffer) {
+        return false;
     }
-    return presentationBuffer;
+    setBuffer(presentationBuffer, infiniteRegion());
+    return true;
 }
 
-DrmDevice *WaylandEglPrimaryLayer::scanoutDevice() const
+DrmDevice *WaylandEglLayer::scanoutDevice() const
 {
     return m_backend->drmDevice();
 }
 
-QHash<uint32_t, QList<uint64_t>> WaylandEglPrimaryLayer::supportedDrmFormats() const
+QHash<uint32_t, QList<uint64_t>> WaylandEglLayer::supportedDrmFormats() const
 {
     return m_backend->backend()->display()->linuxDmabuf()->formats();
 }
 
+void WaylandEglLayer::releaseBuffers()
+{
+    m_buffer.reset();
+    m_swapchain.reset();
+}
+
 WaylandEglCursorLayer::WaylandEglCursorLayer(WaylandOutput *output, WaylandEglBackend *backend)
-    : OutputLayer(output)
+    : OutputLayer(output, OutputLayerType::CursorOnly, 255, 255, 255)
     , m_backend(backend)
 {
 }
@@ -154,25 +159,20 @@ std::optional<OutputLayerBeginFrameInfo> WaylandEglCursorLayer::doBeginFrame()
         return std::nullopt;
     }
 
-    const auto tmp = targetRect().size().expandedTo(QSize(64, 64));
-    const QSize bufferSize(std::ceil(tmp.width()), std::ceil(tmp.height()));
+    const auto bufferSize = targetRect().size();
     if (!m_swapchain || m_swapchain->size() != bufferSize) {
         const QHash<uint32_t, QList<uint64_t>> formatTable = m_backend->backend()->display()->linuxDmabuf()->formats();
-        uint32_t format = DRM_FORMAT_INVALID;
-        QList<uint64_t> modifiers;
-        for (const uint32_t &candidateFormat : {DRM_FORMAT_ARGB2101010, DRM_FORMAT_ARGB8888}) {
-            auto it = formatTable.constFind(candidateFormat);
-            if (it != formatTable.constEnd()) {
-                format = it.key();
-                modifiers = it.value();
+        const auto suitableFormats = filterAndSortFormats(formatTable, m_requiredAlphaBits, m_output->colorPowerTradeoff());
+        for (const auto &candidate : suitableFormats) {
+            auto it = formatTable.constFind(candidate.drmFormat);
+            if (it == formatTable.constEnd()) {
+                continue;
+            }
+            m_swapchain = EglSwapchain::create(m_backend->drmDevice()->allocator(), m_backend->openglContext(), bufferSize, it.key(), it.value());
+            if (m_swapchain) {
                 break;
             }
         }
-        if (format == DRM_FORMAT_INVALID) {
-            qCWarning(KWIN_WAYLAND_BACKEND) << "Could not find a suitable render format";
-            return std::nullopt;
-        }
-        m_swapchain = EglSwapchain::create(m_backend->drmDevice()->allocator(), m_backend->openglContext(), bufferSize, format, modifiers);
         if (!m_swapchain) {
             return std::nullopt;
         }
@@ -203,7 +203,7 @@ bool WaylandEglCursorLayer::doEndFrame(const QRegion &renderedRegion, const QReg
     wl_buffer *buffer = m_backend->backend()->importBuffer(m_buffer->buffer());
     Q_ASSERT(buffer);
 
-    static_cast<WaylandOutput *>(m_output)->cursor()->update(buffer, m_buffer->buffer()->size() / m_output->scale(), hotspot().toPoint());
+    static_cast<WaylandOutput *>(m_output.get())->cursor()->update(buffer, m_buffer->buffer()->size() / m_output->scale(), hotspot().toPoint());
 
     EGLNativeFence releaseFence{m_backend->eglDisplayObject()};
     m_swapchain->release(m_buffer, releaseFence.takeFileDescriptor());
@@ -220,13 +220,16 @@ QHash<uint32_t, QList<uint64_t>> WaylandEglCursorLayer::supportedDrmFormats() co
     return m_backend->supportedFormats();
 }
 
+void WaylandEglCursorLayer::releaseBuffers()
+{
+    m_buffer.reset();
+    m_swapchain.reset();
+}
+
 WaylandEglBackend::WaylandEglBackend(WaylandBackend *b)
     : m_backend(b)
 {
-    connect(m_backend, &WaylandBackend::outputAdded, this, &WaylandEglBackend::createEglWaylandOutput);
-    connect(m_backend, &WaylandBackend::outputRemoved, this, [this](Output *output) {
-        m_outputs.erase(output);
-    });
+    connect(m_backend, &WaylandBackend::outputAdded, this, &WaylandEglBackend::createOutputLayers);
 
     b->setEglBackend(this);
 }
@@ -248,16 +251,26 @@ DrmDevice *WaylandEglBackend::drmDevice() const
 
 void WaylandEglBackend::cleanupSurfaces()
 {
-    m_outputs.clear();
+    const auto outputs = m_backend->outputs();
+    for (Output *output : outputs) {
+        static_cast<WaylandOutput *>(output)->setOutputLayers({});
+    }
 }
 
-bool WaylandEglBackend::createEglWaylandOutput(Output *waylandOutput)
+void WaylandEglBackend::createOutputLayers(Output *output)
 {
-    m_outputs[waylandOutput] = Layers{
-        .primaryLayer = std::make_unique<WaylandEglPrimaryLayer>(static_cast<WaylandOutput *>(waylandOutput), this),
-        .cursorLayer = std::make_unique<WaylandEglCursorLayer>(static_cast<WaylandOutput *>(waylandOutput), this),
-    };
-    return true;
+    const auto waylandOutput = static_cast<WaylandOutput *>(output);
+    std::vector<std::unique_ptr<OutputLayer>> layers;
+    auto primary = std::make_unique<WaylandEglLayer>(waylandOutput, this, OutputLayerType::Primary, 0);
+    primary->subSurface()->placeAbove(waylandOutput->surface());
+    layers.push_back(std::move(primary));
+    for (int z = 1; z < 5; z++) {
+        auto layer = std::make_unique<WaylandEglLayer>(waylandOutput, this, OutputLayerType::GenericLayer, z);
+        layer->subSurface()->placeAbove(static_cast<WaylandEglLayer *>(layers.back().get())->surface());
+        layers.push_back(std::move(layer));
+    }
+    layers.push_back(std::make_unique<WaylandEglCursorLayer>(waylandOutput, this));
+    waylandOutput->setOutputLayers(std::move(layers));
 }
 
 bool WaylandEglBackend::initializeEgl()
@@ -311,32 +324,15 @@ bool WaylandEglBackend::initRenderingContext()
     }
 
     for (auto *out : waylandOutputs) {
-        if (!createEglWaylandOutput(out)) {
-            return false;
-        }
-    }
-
-    if (m_outputs.empty()) {
-        qCCritical(KWIN_WAYLAND_BACKEND) << "Create Window Surfaces failed";
-        return false;
+        createOutputLayers(out);
     }
 
     return openglContext()->makeCurrent();
 }
 
-std::pair<std::shared_ptr<KWin::GLTexture>, ColorDescription> WaylandEglBackend::textureForOutput(KWin::Output *output) const
+QList<OutputLayer *> WaylandEglBackend::compatibleOutputLayers(Output *output)
 {
-    return std::make_pair(m_outputs.at(output).primaryLayer->texture(), ColorDescription::sRGB);
-}
-
-OutputLayer *WaylandEglBackend::primaryLayer(Output *output)
-{
-    return m_outputs[output].primaryLayer.get();
-}
-
-OutputLayer *WaylandEglBackend::cursorLayer(Output *output)
-{
-    return m_outputs[output].cursorLayer.get();
+    return static_cast<WaylandOutput *>(output)->outputLayers();
 }
 
 }

@@ -36,20 +36,11 @@ public:
 
 private:
     QString requestToken(bool isPrivileged, SurfaceInterface *surface, uint serial, SeatInterface *seat, const QString &appId);
-    void clear();
+    void clearFeedback();
 
-    struct ActivationToken
-    {
-        QString token;
-        bool isPrivileged;
-        QPointer<const SurfaceInterface> surface;
-        uint serial;
-        SeatInterface *seat;
-        QString applicationId;
-        bool showNotify;
-        std::unique_ptr<PlasmaWindowActivationInterface> activation;
-    };
-    std::unique_ptr<ActivationToken> m_currentActivationToken;
+    QString m_lastToken;
+    QString m_lastTokenAppId;
+    std::unique_ptr<PlasmaWindowActivationInterface> m_activation;
 };
 
 }

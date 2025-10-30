@@ -108,7 +108,7 @@ void Dnd::doHandleXfixesNotify(xcb_xfixes_selection_notify_event_t *event)
     createX11Source(event);
     if (X11Source *source = x11Source()) {
         SeatInterface *seat = waylandServer()->seat();
-        seat->startDrag(source->dataSource(), seat->focusedPointerSurface(), seat->pointerButtonSerial(Qt::LeftButton));
+        seat->startPointerDrag(source->dataSource(), seat->focusedPointerSurface(), seat->pointerPos(), seat->focusedPointerSurfaceTransformation(), seat->pointerButtonSerial(Qt::LeftButton));
     }
 }
 
@@ -116,7 +116,7 @@ void Dnd::x11OfferLost()
 {
 }
 
-void Dnd::x11OffersChanged(const QStringList &added, const QStringList &removed)
+void Dnd::x11TargetsReceived(const QStringList &mimeTypes)
 {
 }
 
@@ -133,10 +133,10 @@ bool Dnd::handleClientMessage(xcb_client_message_event_t *event)
     return false;
 }
 
-DragEventReply Dnd::dragMoveFilter(Window *target)
+bool Dnd::dragMoveFilter(Window *target, const QPointF &position)
 {
     Q_ASSERT(m_currentDrag);
-    return m_currentDrag->moveFilter(target);
+    return m_currentDrag->moveFilter(target, position);
 }
 
 void Dnd::startDrag()
@@ -149,8 +149,7 @@ void Dnd::startDrag()
         m_currentDrag = new XToWlDrag(x11Source(), this);
     } else {
         m_currentDrag = new WlToXDrag(this);
-        auto source = new WlSource(this);
-        source->setDataSourceIface(dragSource);
+        auto source = new WlSource(dragSource, this);
         connect(dragSource, &AbstractDataSource::aboutToBeDestroyed, this, [this, source] {
             if (source == wlSource()) {
                 setWlSource(nullptr);

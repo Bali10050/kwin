@@ -1,15 +1,15 @@
 cmake_minimum_required(VERSION 3.16)
 
-set(PROJECT_VERSION "6.4.80") # Handled by release scripts
+set(PROJECT_VERSION "6.5.80") # Handled by release scripts
 project(KWin VERSION ${PROJECT_VERSION})
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(PROJECT_DEP_VERSION "6.3.90")
-set(QT_MIN_VERSION "6.8.0")
-set(KF6_MIN_VERSION "6.14.0")
+set(PROJECT_DEP_VERSION "6.4.90")
+set(QT_MIN_VERSION "6.9.0")
+set(KF6_MIN_VERSION "6.18.0")
 set(KDE_COMPILERSETTINGS_LEVEL "5.82")
 
 find_package(ECM ${KF6_MIN_VERSION} REQUIRED NO_MODULE)
@@ -84,6 +84,10 @@ endif()
 
 if (BUILD_TESTING)
     find_package(KPipeWire)
+
+    if (Qt6WaylandClient_VERSION VERSION_GREATER_EQUAL "6.10.0")
+        find_package(Qt6WaylandClientPrivate ${REQUIRED_QT_VERSION} REQUIRED NO_MODULE)
+    endif()
 endif()
 
 # required frameworks by Core
@@ -91,7 +95,6 @@ find_package(KF6 ${KF6_MIN_VERSION} REQUIRED COMPONENTS
     Auth
     ColorScheme
     Config
-    ConfigWidgets
     CoreAddons
     Crash
     DBusAddons
@@ -122,9 +125,9 @@ if(KWIN_BUILD_TABBOX AND KWIN_BUILD_KCMS)
     )
 endif()
 
-find_package(KF6Holidays ${KF6_MIN_VERSION} CONFIG)
-set_package_properties(KF6Holidays PROPERTIES
-    PURPOSE "Needed for sunset and sunrise times in Night Light"
+find_package(KNightTime ${PROJECT_DEP_VERSION} CONFIG)
+set_package_properties(KNightTime PROPERTIES
+    PURPOSE "Needed for Night Light"
     TYPE REQUIRED
 )
 
@@ -198,30 +201,20 @@ set_package_properties(epoxy PROPERTIES
     PURPOSE "OpenGL dispatch library"
 )
 
-find_package(Wayland 1.23)
+find_package(Wayland 1.24)
 set_package_properties(Wayland PROPERTIES
     TYPE REQUIRED
     PURPOSE "Required for building KWin with Wayland support"
 )
-if (Wayland_VERSION VERSION_GREATER_EQUAL 1.23)
-    set(HAVE_WL_DISPLAY_SET_DEFAULT_MAX_BUFFER_SIZE 1)
-else()
-    set(HAVE_WL_DISPLAY_SET_DEFAULT_MAX_BUFFER_SIZE 0)
-endif()
-if (Wayland_VERSION VERSION_GREATER_EQUAL 1.23.90)
-    set(HAVE_WL_FIXES 1)
-else()
-    set(HAVE_WL_FIXES 0)
-endif()
 
-find_package(WaylandProtocols 1.44)
+find_package(WaylandProtocols 1.45)
 set_package_properties(WaylandProtocols PROPERTIES
     TYPE REQUIRED
     PURPOSE "Collection of Wayland protocols that add functionality not available in the Wayland core protocol"
     URL "https://gitlab.freedesktop.org/wayland/wayland-protocols/"
 )
 
-find_package(PlasmaWaylandProtocols 1.18.0 CONFIG)
+find_package(PlasmaWaylandProtocols 1.19.0 CONFIG)
 set_package_properties(PlasmaWaylandProtocols PROPERTIES
     TYPE REQUIRED
     PURPOSE "Collection of Plasma-specific Wayland protocols"
@@ -295,16 +288,11 @@ if (KWIN_BUILD_X11)
     set(XWAYLAND_SESSION_SCRIPTS "/etc/xdg/Xwayland-session.d")
 endif()
 
-find_package(Libinput 1.26)
+find_package(Libinput 1.28)
 set_package_properties(Libinput PROPERTIES TYPE REQUIRED PURPOSE "Required for input handling on Wayland.")
-if (Libinput_VERSION VERSION_GREATER_EQUAL 1.27)
-    set(HAVE_LIBINPUT_INPUT_AREA 1)
-else()
-    set(HAVE_LIBINPUT_INPUT_AREA 0)
-endif()
 
-find_package(Libeis-1.0)
-set_package_properties(Libeis PROPERTIES TYPE OPTIONAL PURPOSE "Required for emulated input handling.")
+find_package(Libeis-1.0 1.4)
+set_package_properties(Libeis-1.0 PROPERTIES TYPE OPTIONAL PURPOSE "Required for emulated input handling.")
 
 find_package(UDev)
 set_package_properties(UDev PROPERTIES
@@ -316,6 +304,12 @@ set_package_properties(UDev PROPERTIES
 
 find_package(Libdrm 2.4.118)
 set_package_properties(Libdrm PROPERTIES TYPE REQUIRED PURPOSE "Required for drm output on Wayland.")
+if (Libdrm_VERSION VERSION_GREATER_EQUAL 2.4.127)
+    set(HAVE_LIBDRM_FAUX 1)
+else()
+    set(HAVE_LIBDRM_FAUX 0)
+endif()
+
 
 find_package(gbm)
 set_package_properties(gbm PROPERTIES TYPE REQUIRED PURPOSE "Required for egl output of drm backend.")
@@ -371,7 +365,6 @@ set_package_properties(QAccessibilityClient6 PROPERTIES
     TYPE OPTIONAL
     PURPOSE "Required to enable accessibility features"
 )
-set(HAVE_ACCESSIBILITY ${QAccessibilityClient6_FOUND})
 
 pkg_check_modules(libsystemd IMPORTED_TARGET libsystemd)
 add_feature_info(libsystemd libsystemd_FOUND "Required for setting up the service watchdog")
@@ -408,6 +401,7 @@ ecm_find_qmlmodule(org.kde.plasma.components 2.0)
 
 cmake_dependent_option(KWIN_BUILD_ACTIVITIES "Enable building of KWin with kactivities support" ON "PlasmaActivities_FOUND" OFF)
 cmake_dependent_option(KWIN_BUILD_EIS "Enable building KWin with libeis support" ON "Libeis-1.0_FOUND" OFF)
+cmake_dependent_option(KWIN_BUILD_QACCESSIBILITYCLIENT "Enable building KWin with libqaccessibilitysupport" ON "QAccessibilityClient6_FOUND" OFF)
 
 include_directories(BEFORE
     ${CMAKE_CURRENT_BINARY_DIR}/src/wayland
@@ -514,7 +508,7 @@ file(GLOB_RECURSE ALL_CLANG_FORMAT_SOURCE_FILES *.cpp *.h)
 kde_clang_format(${ALL_CLANG_FORMAT_SOURCE_FILES})
 kde_configure_git_pre_commit_hook(CHECKS CLANG_FORMAT)
 
-feature_summary(WHAT ALL INCLUDE_QUIET_PACKAGES FATAL_ON_MISSING_REQUIRED_PACKAGES)
+feature_summary(WHAT ALL FATAL_ON_MISSING_REQUIRED_PACKAGES)
 
 set(CMAKECONFIG_DBUS_INSTALL_DIR "${KDE_INSTALL_CMAKEPACKAGEDIR}/KWinDBusInterface")
 configure_package_config_file(KWinDBusInterfaceConfig.cmake.in

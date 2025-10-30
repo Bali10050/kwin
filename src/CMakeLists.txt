@@ -55,8 +55,6 @@ target_sources(kwin PRIVATE
     core/outputlayer.cpp
     core/renderbackend.cpp
     core/renderjournal.cpp
-    core/renderlayer.cpp
-    core/renderlayerdelegate.cpp
     core/renderloop.cpp
     core/rendertarget.cpp
     core/renderviewport.cpp
@@ -154,10 +152,9 @@ target_sources(kwin PRIVATE
     resources.qrc
     rulebooksettings.cpp
     rules.cpp
-    scene/cursordelegate_opengl.cpp
-    scene/cursordelegate_qpainter.cpp
+    scene/borderoutline.cpp
+    scene/borderradius.cpp
     scene/cursoritem.cpp
-    scene/cursorscene.cpp
     scene/decorationitem.cpp
     scene/dndiconitem.cpp
     scene/imageitem.cpp
@@ -166,6 +163,7 @@ target_sources(kwin PRIVATE
     scene/itemrenderer.cpp
     scene/itemrenderer_opengl.cpp
     scene/itemrenderer_qpainter.cpp
+    scene/outlinedborderitem.cpp
     scene/rootitem.cpp
     scene/scene.cpp
     scene/shadowitem.cpp
@@ -175,6 +173,7 @@ target_sources(kwin PRIVATE
     scene/windowitem.cpp
     scene/workspacescene.cpp
     screenedge.cpp
+    screenedgegestures.cpp
     scripting/dbuscall.cpp
     scripting/desktopbackgrounditem.cpp
     scripting/gesturehandler.cpp
@@ -215,6 +214,8 @@ target_sources(kwin PRIVATE
     xdgshellintegration.cpp
     xdgshellwindow.cpp
     xkb.cpp
+    xxpipv1integration.cpp
+    xxpipv1window.cpp
 )
 
 target_link_libraries(kwin
@@ -278,7 +279,6 @@ if (KWIN_BUILD_X11)
     target_link_libraries(kwin
         PRIVATE
             XCB::COMPOSITE
-            XCB::CURSOR
             XCB::ICCCM
             XCB::KEYSYMS
             XCB::RANDR
@@ -320,7 +320,6 @@ qt_add_dbus_interface(kwin_dbus_SRCS org.freedesktop.DBus.Properties.xml dbuspro
 
 if (KWIN_BUILD_SCREENLOCKER)
     qt_add_dbus_interface(kwin_dbus_SRCS ${KSCREENLOCKER_DBUS_INTERFACES_DIR}/kf6_org.freedesktop.ScreenSaver.xml screenlocker_interface)
-    qt_add_dbus_interface(kwin_dbus_SRCS ${KSCREENLOCKER_DBUS_INTERFACES_DIR}/org.kde.screensaver.xml kscreenlocker_interface)
 endif()
 
 qt_add_dbus_interface(kwin_dbus_SRCS org.kde.kappmenu.xml appmenu_interface)
@@ -344,7 +343,6 @@ if (KWIN_BUILD_ACTIVITIES)
 endif()
 
 if (KWIN_BUILD_SCREENLOCKER)
-    target_sources(kwin PRIVATE screenlockerwatcher.cpp)
     target_link_libraries(kwin PRIVATE PW::KScreenLocker)
 endif()
 
@@ -366,6 +364,12 @@ qt_generate_dbus_interface(tabletmodemanager.h org.kde.KWin.TabletModeManager.xm
 generate_export_header(kwin EXPORT_FILE_NAME kwin_export.h)
 
 install(TARGETS kwin EXPORT KWinTargets ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
+
+ecm_qt_declare_logging_category(kwin
+    HEADER outputconfiglogging.h
+    IDENTIFIER KWIN_OUTPUT_CONFIG
+    CATEGORY_NAME kwin_output_config
+)
 
 add_executable(kwin_wayland main_wayland.cpp)
 
@@ -452,11 +456,11 @@ install(FILES
     gestures.h
     globalshortcuts.h
     group.h
-    idledetector.h
     idle_inhibition.h
+    idledetector.h
+    input.h
     input_event.h
     input_event_spy.h
-    input.h
     inputmethod.h
     inputpanelv1integration.h
     inputpanelv1window.h
@@ -487,15 +491,15 @@ install(FILES
     rulebooksettings.h
     rules.h
     screenedge.h
-    screenlockerwatcher.h
+    screenedgegestures.h
     shadow.h
     sm.h
     tablet_input.h
     tabletmodemanager.h
     touch_input.h
     useractions.h
-    virtualdesktopsdbustypes.h
     virtualdesktops.h
+    virtualdesktopsdbustypes.h
     virtualkeyboard_dbus.h
     wayland_server.h
     waylandshellintegration.h
@@ -531,8 +535,6 @@ install(FILES
     core/pixelgrid.h
     core/renderbackend.h
     core/renderjournal.h
-    core/renderlayer.h
-    core/renderlayerdelegate.h
     core/renderloop.h
     core/renderloop_p.h
     core/rendertarget.h
@@ -553,6 +555,7 @@ install(FILES
     utils/edid.h
     utils/executable_path.h
     utils/filedescriptor.h
+    utils/gravity.h
     utils/kernel.h
     utils/memorymap.h
     utils/orientationsensor.h
@@ -606,10 +609,9 @@ install(FILES
 )
 
 install(FILES
-    scene/cursordelegate_opengl.h
-    scene/cursordelegate_qpainter.h
+    scene/borderoutline.h
+    scene/borderradius.h
     scene/cursoritem.h
-    scene/cursorscene.h
     scene/decorationitem.h
     scene/dndiconitem.h
     scene/imageitem.h
@@ -618,6 +620,7 @@ install(FILES
     scene/itemrenderer.h
     scene/itemrenderer_opengl.h
     scene/itemrenderer_qpainter.h
+    scene/outlinedborderitem.h
     scene/rootitem.h
     scene/scene.h
     scene/shadowitem.h

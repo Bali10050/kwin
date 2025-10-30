@@ -21,6 +21,7 @@
 #include "wayland/blur.h"
 #include "wayland/display.h"
 #include "wayland/surface.h"
+#include "window.h"
 
 #if KWIN_BUILD_X11
 #include "utils/xcbutils.h"
@@ -61,6 +62,35 @@ BlurEffect::BlurEffect()
     BlurConfig::instance(effects->config());
     ensureResources();
 
+    m_contrastPass.shader = ShaderManager::instance()->generateShaderFromFile(ShaderTrait::MapTexture,
+                                                                              QStringLiteral(":/effects/blur/shaders/vertex.vert"),
+                                                                              QStringLiteral(":/effects/blur/shaders/contrast.frag"));
+    if (!m_contrastPass.shader) {
+        qCWarning(KWIN_BLUR) << "Failed to load contrast pass shader";
+        return;
+    } else {
+        m_contrastPass.mvpMatrixLocation = m_contrastPass.shader->uniformLocation("modelViewProjectionMatrix");
+        m_contrastPass.colorMatrixLocation = m_contrastPass.shader->uniformLocation("colorMatrix");
+        m_contrastPass.offsetLocation = m_contrastPass.shader->uniformLocation("offset");
+        m_contrastPass.halfpixelLocation = m_contrastPass.shader->uniformLocation("halfpixel");
+    }
+
+    m_roundedContrastPass.shader = ShaderManager::instance()->generateShaderFromFile(ShaderTrait::MapTexture,
+                                                                                     QStringLiteral(":/effects/blur/shaders/contrast_rounded.vert"),
+                                                                                     QStringLiteral(":/effects/blur/shaders/contrast_rounded.frag"));
+    if (!m_roundedContrastPass.shader) {
+        qCWarning(KWIN_BLUR) << "Failed to load contrast pass shader";
+        return;
+    } else {
+        m_roundedContrastPass.mvpMatrixLocation = m_roundedContrastPass.shader->uniformLocation("modelViewProjectionMatrix");
+        m_roundedContrastPass.colorMatrixLocation = m_roundedContrastPass.shader->uniformLocation("colorMatrix");
+        m_roundedContrastPass.offsetLocation = m_roundedContrastPass.shader->uniformLocation("offset");
+        m_roundedContrastPass.halfpixelLocation = m_roundedContrastPass.shader->uniformLocation("halfpixel");
+        m_roundedContrastPass.boxLocation = m_roundedContrastPass.shader->uniformLocation("box");
+        m_roundedContrastPass.cornerRadiusLocation = m_roundedContrastPass.shader->uniformLocation("cornerRadius");
+        m_roundedContrastPass.opacityLocation = m_roundedContrastPass.shader->uniformLocation("opacity");
+    }
+
     m_downsamplePass.shader = ShaderManager::instance()->generateShaderFromFile(ShaderTrait::MapTexture,
                                                                                 QStringLiteral(":/effects/blur/shaders/vertex.vert"),
                                                                                 QStringLiteral(":/effects/blur/shaders/downsample.frag"));
@@ -94,7 +124,6 @@ BlurEffect::BlurEffect()
     } else {
         m_noisePass.mvpMatrixLocation = m_noisePass.shader->uniformLocation("modelViewProjectionMatrix");
         m_noisePass.noiseTextureSizeLocation = m_noisePass.shader->uniformLocation("noiseTextureSize");
-        m_noisePass.texStartPosLocation = m_noisePass.shader->uniformLocation("texStartPos");
     }
 
     initBlurStrengthValues();
@@ -121,7 +150,7 @@ BlurEffect::BlurEffect()
 
     connect(effects, &EffectsHandler::windowAdded, this, &BlurEffect::slotWindowAdded);
     connect(effects, &EffectsHandler::windowDeleted, this, &BlurEffect::slotWindowDeleted);
-    connect(effects, &EffectsHandler::screenRemoved, this, &BlurEffect::slotScreenRemoved);
+    connect(effects, &EffectsHandler::viewRemoved, this, &BlurEffect::slotViewRemoved);
 #if KWIN_BUILD_X11
     connect(effects, &EffectsHandler::propertyNotify, this, &BlurEffect::slotPropertyNotify);
     connect(effects, &EffectsHandler::xcbConnectionChanged, this, [this]() {
@@ -204,6 +233,25 @@ void BlurEffect::initBlurStrengthValues()
     }
 }
 
+QMatrix4x4 BlurEffect::colorMatrix(qreal saturation)
+{
+    QMatrix4x4 satMatrix; // saturation
+
+    // Saturation matrix
+    if (!qFuzzyCompare(saturation, 1.0)) {
+        const qreal rval = (1.0 - saturation) * .2126;
+        const qreal gval = (1.0 - saturation) * .7152;
+        const qreal bval = (1.0 - saturation) * .0722;
+
+        satMatrix = QMatrix4x4(rval + saturation, rval, rval, 0.0,
+                               gval, gval + saturation, gval, 0.0,
+                               bval, bval, bval + saturation, 0.0,
+                               0, 0, 0, 1.0);
+    }
+
+    return satMatrix;
+}
+
 void BlurEffect::reconfigure(ReconfigureFlags flags)
 {
     BlurConfig::self()->read();
@@ -213,6 +261,7 @@ void BlurEffect::reconfigure(ReconfigureFlags flags)
     m_offset = blurStrengthValues[blurStrength].offset;
     m_expandSize = blurOffsets[m_iterationCount - 1].expandSize;
     m_noiseStrength = BlurConfig::noiseStrength();
+    m_saturation = BlurConfig::saturation();
 
     // Update all windows for the blur to take effect
     effects->addRepaintFull();
@@ -288,8 +337,11 @@ void BlurEffect::slotWindowAdded(EffectWindow *w)
         internal->installEventFilter(this);
     }
 
-    connect(w, &EffectWindow::windowDecorationChanged, this, &BlurEffect::setupDecorationConnections);
     setupDecorationConnections(w);
+    connect(w, &EffectWindow::windowDecorationChanged, this, [this, w]() {
+        setupDecorationConnections(w);
+        updateBlurRegion(w);
+    });
 
     updateBlurRegion(w);
 }
@@ -306,10 +358,10 @@ void BlurEffect::slotWindowDeleted(EffectWindow *w)
     }
 }
 
-void BlurEffect::slotScreenRemoved(KWin::Output *screen)
+void BlurEffect::slotViewRemoved(KWin::RenderView *view)
 {
     for (auto &[window, data] : m_windows) {
-        if (auto it = data.render.find(screen); it != data.render.end()) {
+        if (auto it = data.render.find(view); it != data.render.end()) {
             effects->makeOpenGLContextCurrent();
             data.render.erase(it);
         }
@@ -422,7 +474,7 @@ void BlurEffect::prePaintScreen(ScreenPrePaintData &data, std::chrono::milliseco
 {
     m_paintedArea = QRegion();
     m_currentBlur = QRegion();
-    m_currentScreen = data.screen;
+    m_currentView = data.view;
 
     effects->prePaintScreen(data, presentTime);
 }
@@ -544,7 +596,7 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
     }
 
     BlurEffectData &blurInfo = it->second;
-    BlurRenderData &renderInfo = blurInfo.render[m_currentScreen];
+    BlurRenderData &renderInfo = blurInfo.render[m_currentView];
     if (!shouldBlur(w, mask, data)) {
         return;
     }
@@ -787,26 +839,76 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
             vbo->draw(GL_TRIANGLES, 0, 6);
         }
 
-        // The last upsampling pass is rendered on the screen, not in framebuffers[0].
+        ShaderManager::instance()->popShader();
+    }
+
+    if (const BorderRadius cornerRadius = w->window()->borderRadius(); !cornerRadius.isNull()) {
+        ShaderManager::instance()->pushShader(m_roundedContrastPass.shader.get());
+
+        QMatrix4x4 projectionMatrix = viewport.projectionMatrix();
+        projectionMatrix.translate(deviceBackgroundRect.x(), deviceBackgroundRect.y());
+
+        const QMatrix4x4 colorMatrix = BlurEffect::colorMatrix(m_saturation);
+
         GLFramebuffer::popFramebuffer();
         const auto &read = renderInfo.framebuffers[1];
 
-        projectionMatrix = viewport.projectionMatrix();
+        const QVector2D halfpixel(0.5 / read->colorAttachment()->width(),
+                                  0.5 / read->colorAttachment()->height());
+
+        const QRectF transformedRect = QRectF{
+            w->frameGeometry().x() + data.xTranslation(),
+            w->frameGeometry().y() + data.yTranslation(),
+            w->frameGeometry().width() * data.xScale(),
+            w->frameGeometry().height() * data.yScale(),
+        };
+        const QRectF nativeBox = snapToPixelGridF(scaledRect(transformedRect, viewport.scale()))
+                                     .translated(-deviceBackgroundRect.topLeft());
+        const BorderRadius nativeCornerRadius = cornerRadius.scaled(viewport.scale()).rounded();
+
+        m_roundedContrastPass.shader->setUniform(m_roundedContrastPass.mvpMatrixLocation, projectionMatrix);
+        m_roundedContrastPass.shader->setUniform(m_roundedContrastPass.colorMatrixLocation, colorMatrix);
+        m_roundedContrastPass.shader->setUniform(m_roundedContrastPass.halfpixelLocation, halfpixel);
+        m_roundedContrastPass.shader->setUniform(m_roundedContrastPass.offsetLocation, float(m_offset));
+        m_roundedContrastPass.shader->setUniform(m_roundedContrastPass.boxLocation, QVector4D(nativeBox.x() + nativeBox.width() * 0.5, nativeBox.y() + nativeBox.height() * 0.5, nativeBox.width() * 0.5, nativeBox.height() * 0.5));
+        m_roundedContrastPass.shader->setUniform(m_roundedContrastPass.cornerRadiusLocation, nativeCornerRadius.toVector());
+        m_roundedContrastPass.shader->setUniform(m_roundedContrastPass.opacityLocation, opacity);
+
+        read->colorAttachment()->bind();
+
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+
+        vbo->draw(GL_TRIANGLES, 6, vertexCount);
+
+        glDisable(GL_BLEND);
+
+        ShaderManager::instance()->popShader();
+    } else {
+        ShaderManager::instance()->pushShader(m_contrastPass.shader.get());
+
+        QMatrix4x4 projectionMatrix = viewport.projectionMatrix();
         projectionMatrix.translate(deviceBackgroundRect.x(), deviceBackgroundRect.y());
-        m_upsamplePass.shader->setUniform(m_upsamplePass.mvpMatrixLocation, projectionMatrix);
+
+        QMatrix4x4 colorMatrix = BlurEffect::colorMatrix(m_saturation);
+
+        GLFramebuffer::popFramebuffer();
+        const auto &read = renderInfo.framebuffers[1];
 
         const QVector2D halfpixel(0.5 / read->colorAttachment()->width(),
                                   0.5 / read->colorAttachment()->height());
-        m_upsamplePass.shader->setUniform(m_upsamplePass.halfpixelLocation, halfpixel);
+
+        m_contrastPass.shader->setUniform(m_contrastPass.mvpMatrixLocation, projectionMatrix);
+        m_contrastPass.shader->setUniform(m_contrastPass.colorMatrixLocation, colorMatrix);
+        m_contrastPass.shader->setUniform(m_contrastPass.halfpixelLocation, halfpixel);
+        m_contrastPass.shader->setUniform(m_contrastPass.offsetLocation, float(m_offset));
 
         read->colorAttachment()->bind();
 
         // Modulate the blurred texture with the window opacity if the window isn't opaque
         if (opacity < 1.0) {
             glEnable(GL_BLEND);
-            float o = 1.0f - (opacity);
-            o = 1.0f - o * o;
-            glBlendColor(0, 0, 0, o);
+            glBlendColor(0, 0, 0, opacity * opacity);
             glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA);
         }
 
@@ -838,7 +940,6 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
 
             m_noisePass.shader->setUniform(m_noisePass.mvpMatrixLocation, projectionMatrix);
             m_noisePass.shader->setUniform(m_noisePass.noiseTextureSizeLocation, QVector2D(noiseTexture->width(), noiseTexture->height()));
-            m_noisePass.shader->setUniform(m_noisePass.texStartPosLocation, QVector2D(deviceBackgroundRect.topLeft()));
 
             noiseTexture->bind();
 

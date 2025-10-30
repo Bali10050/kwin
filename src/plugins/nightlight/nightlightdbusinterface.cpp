@@ -178,11 +178,6 @@ quint32 NightLightDBusInterface::scheduledTransitionDuration() const
     return quint32(m_manager->scheduledTransitionDuration());
 }
 
-void NightLightDBusInterface::setLocation(double latitude, double longitude)
-{
-    m_manager->autoLocationUpdate(latitude, longitude);
-}
-
 uint NightLightDBusInterface::inhibit()
 {
     const QString serviceName = QDBusContext::message().service();

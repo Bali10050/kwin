@@ -82,9 +82,9 @@ struct SurfaceState
     QPointer<SlideInterface> slide;
     ContentType contentType = ContentType::None;
     PresentationModeHint presentationHint = PresentationModeHint::VSync;
-    ColorDescription colorDescription = ColorDescription::sRGB;
+    std::shared_ptr<ColorDescription> colorDescription = ColorDescription::sRGB;
     RenderingIntent renderingIntent = RenderingIntent::Perceptual;
-    std::unique_ptr<PresentationTimeFeedback> presentationFeedback;
+    std::shared_ptr<PresentationTimeFeedback> presentationFeedback;
     struct
     {
         std::shared_ptr<SyncTimeline> timeline;
@@ -105,7 +105,7 @@ struct SurfaceState
         QList<SubSurfaceInterface *> below;
         QList<SubSurfaceInterface *> above;
 
-        // Subsurface position is here becase it is a part of the parent surface's state.
+        // Subsurface position is here because it is a part of the parent surface's state.
         QHash<SubSurfaceInterface *, QPoint> position;
     } subsurface;
 
@@ -178,7 +178,7 @@ public:
     QPointer<OutputInterface> primaryOutput;
     std::optional<qreal> preferredBufferScale;
     std::optional<OutputTransform> preferredBufferTransform;
-    std::optional<ColorDescription> preferredColorDescription;
+    std::optional<std::shared_ptr<ColorDescription>> preferredColorDescription;
 
     LockedPointerV1Interface *lockedPointer = nullptr;
     ConfinedPointerV1Interface *confinedPointer = nullptr;

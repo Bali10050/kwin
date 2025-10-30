@@ -59,7 +59,7 @@ OutputFrame::~OutputFrame()
     }
 }
 
-void OutputFrame::addFeedback(std::unique_ptr<PresentationFeedback> &&feedback)
+void OutputFrame::addFeedback(std::shared_ptr<PresentationFeedback> &&feedback)
 {
     m_feedbacks.push_back(std::move(feedback));
 }
@@ -118,16 +118,6 @@ PresentationMode OutputFrame::presentationMode() const
     return m_presentationMode;
 }
 
-void OutputFrame::setDamage(const QRegion &region)
-{
-    m_damage = region;
-}
-
-QRegion OutputFrame::damage() const
-{
-    return m_damage;
-}
-
 void OutputFrame::addRenderTimeQuery(std::unique_ptr<RenderTimeQuery> &&query)
 {
     m_renderTimeQueries.push_back(std::move(query));
@@ -166,11 +156,6 @@ std::optional<double> OutputFrame::artificialHdrHeadroom() const
 void OutputFrame::setArtificialHdrHeadroom(double edr)
 {
     m_artificialHdrHeadroom = edr;
-}
-
-OutputLayer *RenderBackend::cursorLayer(Output *output)
-{
-    return nullptr;
 }
 
 bool RenderBackend::checkGraphicsReset()

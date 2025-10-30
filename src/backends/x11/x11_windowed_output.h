@@ -103,7 +103,7 @@ public:
      */
     QPointF mapFromGlobal(const QPointF &pos) const;
 
-    bool updateCursorLayer(std::optional<std::chrono::nanoseconds> allowedVrrDelay) override;
+    bool presentAsync(OutputLayer *layer, std::optional<std::chrono::nanoseconds> allowedVrrDelay) override;
 
     QRegion exposedArea() const;
     void addExposedArea(const QRect &rect);
@@ -113,7 +113,11 @@ public:
     void handlePresentIdleNotify(xcb_present_idle_notify_event_t *event);
 
     void setPrimaryBuffer(GraphicsBuffer *buffer);
-    bool present(const std::shared_ptr<OutputFrame> &frame) override;
+    bool testPresentation(const std::shared_ptr<OutputFrame> &frame) override;
+    bool present(const QList<OutputLayer *> &layersToUpdate, const std::shared_ptr<OutputFrame> &frame) override;
+
+    void setOutputLayers(std::vector<std::unique_ptr<OutputLayer>> &&layers);
+    QList<OutputLayer *> outputLayers() const;
 
 private:
     void initXInputForWindow();
@@ -121,6 +125,7 @@ private:
     xcb_pixmap_t importDmaBufBuffer(const DmaBufAttributes *attributes);
     xcb_pixmap_t importShmBuffer(const ShmAttributes *attributes);
 
+    std::vector<std::unique_ptr<OutputLayer>> m_layers;
     xcb_window_t m_window = XCB_WINDOW_NONE;
     xcb_present_event_t m_presentEvent = XCB_NONE;
     xcb_pixmap_t m_pendingBuffer = XCB_PIXMAP_NONE;

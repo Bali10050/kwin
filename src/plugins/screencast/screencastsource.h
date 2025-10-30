@@ -29,8 +29,9 @@ public:
     virtual QSize textureSize() const = 0;
     virtual qreal devicePixelRatio() const = 0;
 
-    virtual void render(GLFramebuffer *target) = 0;
-    virtual void render(QImage *target) = 0;
+    virtual void setRenderCursor(bool enable) = 0;
+    virtual QRegion render(GLFramebuffer *target, const QRegion &bufferRepair) = 0;
+    virtual QRegion render(QImage *target, const QRegion &bufferRepair) = 0;
     virtual std::chrono::nanoseconds clock() const = 0;
 
     virtual void resume() = 0;
@@ -42,7 +43,7 @@ public:
     virtual QRectF mapFromGlobal(const QRectF &rect) const = 0;
 
 Q_SIGNALS:
-    void frame(const QRegion &damage);
+    void frame();
     void closed();
 };
 

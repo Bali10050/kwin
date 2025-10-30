@@ -18,7 +18,7 @@
 #include <QPointer>
 #include <QSize>
 #include <QSocketNotifier>
-#include <qobject.h>
+#include <QTimer>
 
 #include <chrono>
 #include <epoxy/egl.h>
@@ -84,6 +84,7 @@ public:
 
     bool atomicModeSetting() const;
     bool addFB2ModifiersSupported() const;
+    bool forceLowBandwidthMode() const;
     bool asyncPageflipSupported() const;
     bool isI915() const;
     bool isNVidia() const;
@@ -110,13 +111,15 @@ public:
     void removeOutputs();
 
     DrmPipeline::Error testPendingConfiguration();
+    void releaseUnusedBuffers();
     bool needsModeset() const;
     void maybeModeset(DrmPipeline *pipeline, const std::shared_ptr<OutputFrame> &frame);
 
     std::shared_ptr<DrmFramebuffer> importBuffer(GraphicsBuffer *buffer, FileDescriptor &&explicitFence);
     void forgetBuffer(GraphicsBuffer *buf);
     void releaseBuffers();
-    void recreateSurfaces();
+    void createLayers();
+    QList<OutputLayer *> compatibleOutputLayers(Output *output) const;
 
     FileDescriptor createNonMasterFd() const;
     std::unique_ptr<DrmLease> leaseOutputs(const QList<DrmOutput *> &outputs);
@@ -135,10 +138,12 @@ private:
     void removeOutput(DrmOutput *output);
     void initDrmResources();
     void forgetBufferObject(QObject *buf);
+    void doModeset();
 
     DrmPipeline::Error checkCrtcAssignment(QList<DrmConnector *> connectors, const QList<DrmCrtc *> &crtcs);
     DrmPipeline::Error testPipelines();
-    QList<DrmObject *> unusedObjects() const;
+    QList<DrmObject *> unusedModesetObjects() const;
+    void assignOutputLayers();
 
     static void pageFlipHandler(int fd, unsigned int sequence, unsigned int sec, unsigned int usec, unsigned int crtc_id, void *user_data);
 
@@ -157,6 +162,7 @@ private:
     bool m_isRemoved = false;
     bool m_isActive = true;
     bool m_forceModeset = false;
+    bool m_forceLowBandwidthMode = false;
     clockid_t m_presentationClock;
     std::unique_ptr<EglDisplay> m_eglDisplay;
     DrmBackend *const m_platform;
@@ -166,6 +172,9 @@ private:
     std::vector<std::unique_ptr<DrmCrtc>> m_crtcs;
     std::vector<std::shared_ptr<DrmConnector>> m_connectors;
     std::unordered_map<DrmConnector *, std::unique_ptr<DrmPipeline>> m_pipelineMap;
+    std::unordered_map<DrmPlane *, std::unique_ptr<DrmPipelineLayer>> m_planeLayerMap;
+    std::unordered_map<DrmCrtc *, std::unique_ptr<DrmPipelineLayer>> m_legacyLayerMap;
+    std::unordered_map<DrmCrtc *, std::unique_ptr<DrmPipelineLayer>> m_legacyCursorLayerMap;
     QList<DrmObject *> m_allObjects;
     QList<DrmPipeline *> m_pipelines;
 
@@ -177,6 +186,7 @@ private:
     bool m_inModeset = false;
     QHash<GraphicsBuffer *, std::weak_ptr<DrmFramebufferData>> m_fbCache;
     std::vector<std::unique_ptr<DrmCommit>> m_defunctCommits;
+    QTimer m_delayedModesetTimer;
 };
 
 }

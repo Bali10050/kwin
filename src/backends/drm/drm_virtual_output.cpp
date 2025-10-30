@@ -47,11 +47,15 @@ DrmVirtualOutput::~DrmVirtualOutput()
 {
 }
 
-bool DrmVirtualOutput::present(const std::shared_ptr<OutputFrame> &frame)
+bool DrmVirtualOutput::testPresentation(const std::shared_ptr<OutputFrame> &frame)
+{
+    return true;
+}
+
+bool DrmVirtualOutput::present(const QList<OutputLayer *> &layersToUpdate, const std::shared_ptr<OutputFrame> &frame)
 {
     m_frame = frame;
     m_vsyncMonitor->arm();
-    Q_EMIT outputChange(frame->damage());
     return true;
 }
 
@@ -75,14 +79,10 @@ DrmOutputLayer *DrmVirtualOutput::primaryLayer() const
     return m_layer.get();
 }
 
-DrmOutputLayer *DrmVirtualOutput::cursorLayer() const
-{
-    return nullptr;
-}
-
 void DrmVirtualOutput::recreateSurface()
 {
     m_layer = m_backend->renderBackend()->createLayer(this);
+    Q_EMIT outputLayersChanged();
 }
 
 }

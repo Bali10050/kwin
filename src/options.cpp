@@ -38,8 +38,6 @@ Options::Options(QObject *parent)
     , m_autoRaise(false)
     , m_autoRaiseInterval(0)
     , m_delayFocusInterval(0)
-    , m_shadeHover(false)
-    , m_shadeHoverInterval(0)
     , m_separateScreenFocus(true)
     , m_placement(PlacementNone)
     , m_activationDesktopPolicy(Options::defaultActivationDesktopPolicy())
@@ -50,7 +48,7 @@ Options::Options(QObject *parent)
     , m_edgeBarrier(0)
     , m_cornerBarrier(0)
     , m_rollOverDesktops(false)
-    , m_focusStealingPreventionLevel(0)
+    , m_focusStealingPreventionLevel(FocusStealingPreventionLevel::None)
     , m_killPingTimeout(0)
     , m_xwaylandCrashPolicy(Options::defaultXwaylandCrashPolicy())
     , m_xwaylandMaxCrashCount(Options::defaultXwaylandMaxCrashCount())
@@ -221,24 +219,6 @@ void Options::setDelayFocusInterval(int delayFocusInterval)
     Q_EMIT delayFocusIntervalChanged();
 }
 
-void Options::setShadeHover(bool shadeHover)
-{
-    if (m_shadeHover == shadeHover) {
-        return;
-    }
-    m_shadeHover = shadeHover;
-    Q_EMIT shadeHoverChanged();
-}
-
-void Options::setShadeHoverInterval(int shadeHoverInterval)
-{
-    if (m_shadeHoverInterval == shadeHoverInterval) {
-        return;
-    }
-    m_shadeHoverInterval = shadeHoverInterval;
-    Q_EMIT shadeHoverIntervalChanged();
-}
-
 void Options::setSeparateScreenFocus(bool separateScreenFocus)
 {
     if (m_separateScreenFocus == separateScreenFocus) {
@@ -329,15 +309,15 @@ void Options::setRollOverDesktops(bool rollOverDesktops)
     Q_EMIT rollOverDesktopsChanged(m_rollOverDesktops);
 }
 
-void Options::setFocusStealingPreventionLevel(int focusStealingPreventionLevel)
+void Options::setFocusStealingPreventionLevel(FocusStealingPreventionLevel focusStealingPreventionLevel)
 {
     if (!focusPolicyIsReasonable()) {
-        focusStealingPreventionLevel = 0;
+        focusStealingPreventionLevel = FocusStealingPreventionLevel::None;
     }
-    if (m_focusStealingPreventionLevel == focusStealingPreventionLevel) {
+    if (m_focusStealingPreventionLevel == FocusStealingPreventionLevel(focusStealingPreventionLevel)) {
         return;
     }
-    m_focusStealingPreventionLevel = std::max(0, std::min(4, focusStealingPreventionLevel));
+    m_focusStealingPreventionLevel = std::max(FocusStealingPreventionLevel::None, std::min(FocusStealingPreventionLevel::Extreme, focusStealingPreventionLevel));
     Q_EMIT focusStealingPreventionLevelChanged();
 }
 
@@ -601,6 +581,45 @@ void Options::setInteractiveWindowMoveEnabled(bool set)
     }
 }
 
+Qt::Corner Options::pictureInPictureHomeCorner() const
+{
+    return m_pictureInPictureHomeCorner;
+}
+
+void Options::setPictureInPictureHomeCorner(Qt::Corner corner)
+{
+    if (m_pictureInPictureHomeCorner != corner) {
+        m_pictureInPictureHomeCorner = corner;
+        Q_EMIT pictureInPictureHomeCornerChanged();
+    }
+}
+
+int Options::pictureInPictureMargin() const
+{
+    return m_pictureInPictureMargin;
+}
+
+void Options::setPictureInPictureMargin(int margin)
+{
+    if (m_pictureInPictureMargin != margin) {
+        m_pictureInPictureMargin = margin;
+        Q_EMIT pictureInPictureMarginChanged();
+    }
+}
+
+bool Options::overlayVirtualKeyboardOnWindows() const
+{
+    return m_overlayVirtualKeyboardOnWindows;
+}
+
+void Options::setOverlayVirtualKeyboardOnWindows(bool overlay)
+{
+    if (overlay != m_overlayVirtualKeyboardOnWindows) {
+        m_overlayVirtualKeyboardOnWindows = overlay;
+        Q_EMIT overlayVirtualKeyboardOnWindowsChanged();
+    }
+}
+
 void Options::reparseConfiguration()
 {
     m_settings->config()->reparseConfiguration();
@@ -681,7 +700,7 @@ void Options::syncFromKcfgc()
     setNextFocusPrefersMouse(m_settings->nextFocusPrefersMouse());
     setSeparateScreenFocus(m_settings->separateScreenFocus());
     setRollOverDesktops(m_settings->rollOverDesktops());
-    setFocusStealingPreventionLevel(m_settings->focusStealingPreventionLevel());
+    setFocusStealingPreventionLevel(FocusStealingPreventionLevel(m_settings->focusStealingPreventionLevel()));
     setActivationDesktopPolicy(m_settings->activationDesktopPolicy());
     setXwaylandCrashPolicy(m_settings->xwaylandCrashPolicy());
     setXwaylandMaxCrashCount(m_settings->xwaylandMaxCrashCount());
@@ -692,8 +711,6 @@ void Options::syncFromKcfgc()
     setAutoRaise(m_settings->autoRaise());
     setAutoRaiseInterval(m_settings->autoRaiseInterval());
     setDelayFocusInterval(m_settings->delayFocusInterval());
-    setShadeHover(m_settings->shadeHover());
-    setShadeHoverInterval(m_settings->shadeHoverInterval());
     setClickRaise(m_settings->clickRaise());
     setBorderSnapZone(m_settings->borderSnapZone());
     setWindowSnapZone(m_settings->windowSnapZone());
@@ -708,7 +725,10 @@ void Options::syncFromKcfgc()
     setElectricBorderCornerRatio(m_settings->electricBorderCornerRatio());
     setAllowTearing(m_settings->allowTearing());
     setInteractiveWindowMoveEnabled(m_settings->interactiveWindowMoveEnabled());
+    setOverlayVirtualKeyboardOnWindows(m_settings->overlayVirtualKeyboardOnWindows());
     setDoubleClickBorderToMaximize(m_settings->doubleClickBorderToMaximize());
+    setPictureInPictureHomeCorner(m_settings->pictureInPictureHomeCorner());
+    setPictureInPictureMargin(m_settings->pictureInPictureMargin());
 }
 
 // restricted should be true for operations that the user may not be able to repeat
@@ -729,10 +749,6 @@ Options::WindowOperation Options::windowOperation(const QString &name, bool rest
         return CloseOp;
     } else if (name == QLatin1StringView("OnAllDesktops")) {
         return OnAllDesktopsOp;
-    } else if (name == QLatin1StringView("Shade")) {
-        return ShadeOp;
-    } else if (name == QLatin1StringView("Operations")) {
-        return OperationsOp;
     } else if (name == QLatin1StringView("Maximize (vertical only)")) {
         return VMaximizeOp;
     } else if (name == QLatin1StringView("Maximize (horizontal only)")) {
@@ -794,9 +810,6 @@ Options::MouseCommand Options::mouseCommand(const QString &name, bool restricted
     if (lowerName == QLatin1StringView("resize")) {
         return restricted ? MouseResize : MouseUnrestrictedResize;
     }
-    if (lowerName == QLatin1StringView("shade")) {
-        return MouseShade;
-    }
     if (lowerName == QLatin1StringView("minimize")) {
         return MouseMinimize;
     }
@@ -820,9 +833,6 @@ Options::MouseWheelCommand Options::mouseWheelCommand(const QString &name)
     QString lowerName = name.toLower();
     if (lowerName == QLatin1StringView("raise/lower")) {
         return MouseWheelRaiseLower;
-    }
-    if (lowerName == QLatin1StringView("shade/unshade")) {
-        return MouseWheelShadeUnshade;
     }
     if (lowerName == QLatin1StringView("maximize/restore")) {
         return MouseWheelMaximizeRestore;
@@ -852,8 +862,6 @@ Options::MouseCommand Options::wheelToMouseCommand(MouseWheelCommand com, qreal 
     switch (com) {
     case MouseWheelRaiseLower:
         return delta > 0 ? MouseRaise : MouseLower;
-    case MouseWheelShadeUnshade:
-        return delta > 0 ? MouseSetShade : MouseUnsetShade;
     case MouseWheelMaximizeRestore:
         return delta > 0 ? MouseMaximize : MouseRestore;
     case MouseWheelAboveBelow:

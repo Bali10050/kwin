@@ -59,7 +59,7 @@ void DataOfferInterfacePrivate::data_offer_accept(Resource *resource, uint32_t s
 
 void DataOfferInterfacePrivate::data_offer_receive(Resource *resource, const QString &mime_type, int32_t fd)
 {
-    if (!source) {
+    if (!source || !source->mimeTypes().contains(mime_type)) {
         close(fd);
         return;
     }
@@ -151,6 +151,7 @@ void DataOfferInterface::sendSourceActions()
 
 void DataOfferInterfacePrivate::data_offer_destroy_resource(QtWaylandServer::wl_data_offer::Resource *resource)
 {
+    Q_EMIT q->discarded();
     delete q;
 }
 

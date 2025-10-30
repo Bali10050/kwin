@@ -361,6 +361,10 @@ void OutputDeviceV2InterfacePrivate::kde_output_device_v2_destroy_global()
 
 void OutputDeviceV2InterfacePrivate::kde_output_device_v2_bind_resource(Resource *resource)
 {
+    if (isGlobalRemoved()) {
+        return;
+    }
+
     sendGeometry(resource);
     sendScale(resource);
     sendEisaId(resource);
@@ -975,8 +979,8 @@ void OutputDeviceV2Interface::updateColorPowerTradeoff()
         const auto clientResources = d->resourceMap();
         for (auto resource : clientResources) {
             d->sendColorPowerTradeoff(resource);
-            d->sendDone(resource);
         }
+        scheduleDone();
     }
 }
 
@@ -1002,6 +1006,7 @@ void OutputDeviceV2Interface::updateReplicationSource()
         for (auto resource : clientResources) {
             d->sendReplicationSource(resource);
         }
+        scheduleDone();
     }
 }
 
@@ -1030,6 +1035,7 @@ void OutputDeviceV2Interface::updateDdcCiAllowed()
         for (const auto &resource : clientResources) {
             d->sendDdcCiAllowed(resource);
         }
+        scheduleDone();
     }
 }
 

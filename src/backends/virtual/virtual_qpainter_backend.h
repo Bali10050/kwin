@@ -38,6 +38,7 @@ public:
     QImage *image();
     DrmDevice *scanoutDevice() const override;
     QHash<uint32_t, QList<uint64_t>> supportedDrmFormats() const override;
+    void releaseBuffers() override;
 
 private:
     VirtualQPainterBackend *const m_backend;
@@ -55,14 +56,13 @@ public:
 
     GraphicsBufferAllocator *graphicsBufferAllocator() const;
 
-    VirtualQPainterLayer *primaryLayer(Output *output) override;
+    QList<OutputLayer *> compatibleOutputLayers(Output *output) override;
 
 private:
     void addOutput(Output *output);
-    void removeOutput(Output *output);
 
+    VirtualBackend *const m_backend;
     std::unique_ptr<GraphicsBufferAllocator> m_allocator;
-    std::map<Output *, std::unique_ptr<VirtualQPainterLayer>> m_outputs;
 };
 
 } // namespace KWin

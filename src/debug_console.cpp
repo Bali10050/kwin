@@ -18,7 +18,10 @@
 #include "opengl/glplatform.h"
 #include "opengl/glutils.h"
 #include "scene/workspacescene.h"
+#include "tiles/customtile.h"
+#include "tiles/tile.h"
 #include "utils/filedescriptor.h"
+#include "virtualdesktops.h"
 #include "wayland/abstract_data_source.h"
 #include "wayland/clientconnection.h"
 #include "wayland/datacontrolsource_v1.h"
@@ -45,6 +48,8 @@
 #include <QMetaProperty>
 #include <QMetaType>
 #include <QMouseEvent>
+#include <QPainter>
+#include <QPixmap>
 #include <QPushButton>
 #include <QScopeGuard>
 #include <QSortFilterProxyModel>
@@ -311,147 +316,184 @@ void DebugConsoleFilter::keyboardKey(KeyboardKeyEvent *event)
     m_textEdit->ensureCursorVisible();
 }
 
-void DebugConsoleFilter::touchDown(qint32 id, const QPointF &pos, std::chrono::microseconds time)
+void DebugConsoleFilter::touchDown(TouchDownEvent *event)
 {
     QString text = s_hr;
     text.append(s_tableStart);
     text.append(tableHeaderRow(i18nc("A touch down event", "Touch down")));
-    text.append(timestampRow(time));
-    text.append(tableRow(i18nc("The id of the touch point in the touch event", "Point identifier"), id));
+    text.append(timestampRow(event->time));
+    text.append(tableRow(i18nc("The id of the touch point in the touch event", "Point identifier"), event->id));
     text.append(tableRow(i18nc("The global position of the touch point", "Global position"),
-                         QStringLiteral("%1/%2").arg(pos.x()).arg(pos.y())));
+                         QStringLiteral("%1/%2").arg(event->pos.x()).arg(event->pos.y())));
     text.append(s_tableEnd);
 
     m_textEdit->insertHtml(text);
     m_textEdit->ensureCursorVisible();
 }
 
-void DebugConsoleFilter::touchMotion(qint32 id, const QPointF &pos, std::chrono::microseconds time)
+void DebugConsoleFilter::touchMotion(TouchMotionEvent *event)
 {
     QString text = s_hr;
     text.append(s_tableStart);
     text.append(tableHeaderRow(i18nc("A touch motion event", "Touch Motion")));
-    text.append(timestampRow(time));
-    text.append(tableRow(i18nc("The id of the touch point in the touch event", "Point identifier"), id));
+    text.append(timestampRow(event->time));
+    text.append(tableRow(i18nc("The id of the touch point in the touch event", "Point identifier"), event->id));
     text.append(tableRow(i18nc("The global position of the touch point", "Global position"),
-                         QStringLiteral("%1/%2").arg(pos.x()).arg(pos.y())));
+                         QStringLiteral("%1/%2").arg(event->pos.x()).arg(event->pos.y())));
     text.append(s_tableEnd);
 
     m_textEdit->insertHtml(text);
     m_textEdit->ensureCursorVisible();
 }
 
-void DebugConsoleFilter::touchUp(qint32 id, std::chrono::microseconds time)
+void DebugConsoleFilter::touchUp(TouchUpEvent *event)
 {
     QString text = s_hr;
     text.append(s_tableStart);
     text.append(tableHeaderRow(i18nc("A touch up event", "Touch Up")));
-    text.append(timestampRow(time));
-    text.append(tableRow(i18nc("The id of the touch point in the touch event", "Point identifier"), id));
+    text.append(timestampRow(event->time));
+    text.append(tableRow(i18nc("The id of the touch point in the touch event", "Point identifier"), event->id));
     text.append(s_tableEnd);
 
     m_textEdit->insertHtml(text);
     m_textEdit->ensureCursorVisible();
 }
 
-void DebugConsoleFilter::pinchGestureBegin(int fingerCount, std::chrono::microseconds time)
+void DebugConsoleFilter::pinchGestureBegin(PointerPinchGestureBeginEvent *event)
 {
     QString text = s_hr;
     text.append(s_tableStart);
     text.append(tableHeaderRow(i18nc("A pinch gesture is started", "Pinch start")));
-    text.append(timestampRow(time));
-    text.append(tableRow(i18nc("Number of fingers in this pinch gesture", "Finger count"), fingerCount));
+    text.append(timestampRow(event->time));
+    text.append(tableRow(i18nc("Number of fingers in this pinch gesture", "Finger count"), event->fingerCount));
     text.append(s_tableEnd);
 
     m_textEdit->insertHtml(text);
     m_textEdit->ensureCursorVisible();
 }
 
-void DebugConsoleFilter::pinchGestureUpdate(qreal scale, qreal angleDelta, const QPointF &delta, std::chrono::microseconds time)
+void DebugConsoleFilter::pinchGestureUpdate(PointerPinchGestureUpdateEvent *event)
 {
     QString text = s_hr;
     text.append(s_tableStart);
     text.append(tableHeaderRow(i18nc("A pinch gesture is updated", "Pinch update")));
-    text.append(timestampRow(time));
-    text.append(tableRow(i18nc("Current scale in pinch gesture", "Scale"), scale));
-    text.append(tableRow(i18nc("Current angle in pinch gesture", "Angle delta"), angleDelta));
-    text.append(tableRow(i18nc("Current delta in pinch gesture", "Delta x"), delta.x()));
-    text.append(tableRow(i18nc("Current delta in pinch gesture", "Delta y"), delta.y()));
+    text.append(timestampRow(event->time));
+    text.append(tableRow(i18nc("Current scale in pinch gesture", "Scale"), event->scale));
+    text.append(tableRow(i18nc("Current angle in pinch gesture", "Angle delta"), event->angleDelta));
+    text.append(tableRow(i18nc("Current delta in pinch gesture", "Delta x"), event->delta.x()));
+    text.append(tableRow(i18nc("Current delta in pinch gesture", "Delta y"), event->delta.y()));
     text.append(s_tableEnd);
 
     m_textEdit->insertHtml(text);
     m_textEdit->ensureCursorVisible();
 }
 
-void DebugConsoleFilter::pinchGestureEnd(std::chrono::microseconds time)
+void DebugConsoleFilter::pinchGestureEnd(PointerPinchGestureEndEvent *event)
 {
     QString text = s_hr;
     text.append(s_tableStart);
     text.append(tableHeaderRow(i18nc("A pinch gesture ended", "Pinch end")));
-    text.append(timestampRow(time));
+    text.append(timestampRow(event->time));
     text.append(s_tableEnd);
 
     m_textEdit->insertHtml(text);
     m_textEdit->ensureCursorVisible();
 }
 
-void DebugConsoleFilter::pinchGestureCancelled(std::chrono::microseconds time)
+void DebugConsoleFilter::pinchGestureCancelled(PointerPinchGestureCancelEvent *event)
 {
     QString text = s_hr;
     text.append(s_tableStart);
     text.append(tableHeaderRow(i18nc("A pinch gesture got cancelled", "Pinch cancelled")));
-    text.append(timestampRow(time));
+    text.append(timestampRow(event->time));
     text.append(s_tableEnd);
 
     m_textEdit->insertHtml(text);
     m_textEdit->ensureCursorVisible();
 }
 
-void DebugConsoleFilter::swipeGestureBegin(int fingerCount, std::chrono::microseconds time)
+void DebugConsoleFilter::swipeGestureBegin(PointerSwipeGestureBeginEvent *event)
 {
     QString text = s_hr;
     text.append(s_tableStart);
     text.append(tableHeaderRow(i18nc("A swipe gesture is started", "Swipe start")));
-    text.append(timestampRow(time));
-    text.append(tableRow(i18nc("Number of fingers in this swipe gesture", "Finger count"), fingerCount));
+    text.append(timestampRow(event->time));
+    text.append(tableRow(i18nc("Number of fingers in this swipe gesture", "Finger count"), event->fingerCount));
     text.append(s_tableEnd);
 
     m_textEdit->insertHtml(text);
     m_textEdit->ensureCursorVisible();
 }
 
-void DebugConsoleFilter::swipeGestureUpdate(const QPointF &delta, std::chrono::microseconds time)
+void DebugConsoleFilter::swipeGestureUpdate(PointerSwipeGestureUpdateEvent *event)
 {
     QString text = s_hr;
     text.append(s_tableStart);
     text.append(tableHeaderRow(i18nc("A swipe gesture is updated", "Swipe update")));
-    text.append(timestampRow(time));
-    text.append(tableRow(i18nc("Current delta in swipe gesture", "Delta x"), delta.x()));
-    text.append(tableRow(i18nc("Current delta in swipe gesture", "Delta y"), delta.y()));
+    text.append(timestampRow(event->time));
+    text.append(tableRow(i18nc("Current delta in swipe gesture", "Delta x"), event->delta.x()));
+    text.append(tableRow(i18nc("Current delta in swipe gesture", "Delta y"), event->delta.y()));
     text.append(s_tableEnd);
 
     m_textEdit->insertHtml(text);
     m_textEdit->ensureCursorVisible();
 }
 
-void DebugConsoleFilter::swipeGestureEnd(std::chrono::microseconds time)
+void DebugConsoleFilter::swipeGestureEnd(PointerSwipeGestureEndEvent *event)
 {
     QString text = s_hr;
     text.append(s_tableStart);
     text.append(tableHeaderRow(i18nc("A swipe gesture ended", "Swipe end")));
-    text.append(timestampRow(time));
+    text.append(timestampRow(event->time));
     text.append(s_tableEnd);
 
     m_textEdit->insertHtml(text);
     m_textEdit->ensureCursorVisible();
 }
 
-void DebugConsoleFilter::swipeGestureCancelled(std::chrono::microseconds time)
+void DebugConsoleFilter::swipeGestureCancelled(PointerSwipeGestureCancelEvent *event)
 {
     QString text = s_hr;
     text.append(s_tableStart);
     text.append(tableHeaderRow(i18nc("A swipe gesture got cancelled", "Swipe cancelled")));
-    text.append(timestampRow(time));
+    text.append(timestampRow(event->time));
+    text.append(s_tableEnd);
+
+    m_textEdit->insertHtml(text);
+    m_textEdit->ensureCursorVisible();
+}
+
+void DebugConsoleFilter::holdGestureBegin(PointerHoldGestureBeginEvent *event)
+{
+    QString text = s_hr;
+    text.append(s_tableStart);
+    text.append(tableHeaderRow(i18nc("A hold gesture is started", "Hold start")));
+    text.append(timestampRow(event->time));
+    text.append(tableRow(i18nc("Number of fingers in this hold gesture", "Finger count"), event->fingerCount));
+    text.append(s_tableEnd);
+
+    m_textEdit->insertHtml(text);
+    m_textEdit->ensureCursorVisible();
+}
+
+void DebugConsoleFilter::holdGestureEnd(PointerHoldGestureEndEvent *event)
+{
+    QString text = s_hr;
+    text.append(s_tableStart);
+    text.append(tableHeaderRow(i18nc("A hold gesture ended", "Hold end")));
+    text.append(timestampRow(event->time));
+    text.append(s_tableEnd);
+
+    m_textEdit->insertHtml(text);
+    m_textEdit->ensureCursorVisible();
+}
+
+void DebugConsoleFilter::holdGestureCancelled(PointerHoldGestureCancelEvent *event)
+{
+    QString text = s_hr;
+    text.append(s_tableStart);
+    text.append(tableHeaderRow(i18nc("A hold gesture got cancelled", "Hold cancelled")));
+    text.append(timestampRow(event->time));
     text.append(s_tableEnd);
 
     m_textEdit->insertHtml(text);
@@ -532,6 +574,8 @@ void DebugConsoleFilter::tabletToolTipEvent(TabletToolTipEvent *event)
                    QStringLiteral("%1,%2").arg(event->xTilt).arg(event->yTilt))
         + tableRow(i18n("Rotation"), QString::number(event->rotation))
         + tableRow(i18n("Pressure"), QString::number(event->pressure))
+        + tableRow(i18n("Distance"), QString::number(event->distance))
+        + tableRow(i18n("Slider Position"), QString::number(event->sliderPosition))
         + tableRow(i18n("Buttons"), QString::number(event->buttons))
         + s_tableEnd;
 
@@ -558,6 +602,9 @@ void DebugConsoleFilter::tabletPadButtonEvent(TabletPadButtonEvent *event)
         + tableHeaderRow(i18n("Tablet Pad Button"))
         + tableRow(i18n("Button"), event->button)
         + tableRow(i18n("Pressed"), event->pressed)
+        + tableRow(i18n("Group"), event->group)
+        + tableRow(i18n("Mode"), event->mode)
+        + tableRow(i18n("Is Mode Switch"), event->isModeSwitch)
         + tableRow(i18n("Tablet"), event->device->name())
         + timestampRow(event->time)
         + s_tableEnd;
@@ -572,6 +619,8 @@ void DebugConsoleFilter::tabletPadStripEvent(TabletPadStripEvent *event)
         + tableRow(i18n("Number"), event->number)
         + tableRow(i18n("Position"), event->position)
         + tableRow(i18n("isFinger"), event->isFinger)
+        + tableRow(i18n("Group"), event->group)
+        + tableRow(i18n("Mode"), event->mode)
         + tableRow(i18n("Tablet"), event->device->name())
         + timestampRow(event->time)
         + s_tableEnd;
@@ -586,6 +635,8 @@ void DebugConsoleFilter::tabletPadRingEvent(TabletPadRingEvent *event)
         + tableRow(i18n("Number"), event->number)
         + tableRow(i18n("Position"), event->position)
         + tableRow(i18n("isFinger"), event->isFinger)
+        + tableRow(i18n("Group"), event->group)
+        + tableRow(i18n("Mode"), event->mode)
         + tableRow(i18n("Tablet"), event->device->name())
         + timestampRow(event->time)
         + s_tableEnd;
@@ -806,7 +857,25 @@ QString DebugConsoleDelegate::displayText(const QVariant &value, const QLocale &
         const QRectF r = value.toRectF();
         return QStringLiteral("%1,%2 %3x%4").arg(r.x()).arg(r.y()).arg(r.width()).arg(r.height());
     }
+    case QMetaType::QIcon: {
+        const QIcon icon = value.value<QIcon>();
+        if (!icon.isNull()) {
+            const auto sizes = icon.availableSizes();
+
+            QStringList sizesStringList;
+            sizesStringList.reserve(sizes.size());
+            for (const auto &size : sizes) {
+                sizesStringList.append(QString::number(size.width()));
+            }
+            return QStringLiteral("%1 (%2)").arg(icon.name(), displayText(sizesStringList, locale));
+        } else {
+            return QStringLiteral("null");
+        }
+    }
     default:
+        if (value.userType() == qMetaTypeId<QStringList>()) {
+            return value.toStringList().join(QLatin1String(", "));
+        }
         if (value.userType() == qMetaTypeId<KWin::SurfaceInterface *>()) {
             if (auto s = value.value<KWin::SurfaceInterface *>()) {
                 return QStringLiteral("KWin::SurfaceInterface(0x%1)").arg(qulonglong(s), 0, 16);
@@ -820,6 +889,45 @@ QString DebugConsoleDelegate::displayText(const QVariant &value, const QLocale &
             } else {
                 return QStringLiteral("nullptr");
             }
+        }
+        if (value.userType() == qMetaTypeId<KWin::Output *>()) {
+            if (auto output = value.value<KWin::Output *>()) {
+                return QStringLiteral("%1 (%2@%3x)").arg(output->name(), displayText(output->geometry(), locale), QString::number(output->scale()));
+            } else {
+                return QStringLiteral("nullptr");
+            }
+        }
+        if (value.userType() == qMetaTypeId<KWin::Tile *>()) {
+            if (auto tile = value.value<KWin::Tile *>()) {
+                const QString tileGeometry = displayText(tile->absoluteGeometry(), locale);
+
+                if (auto customTile = qobject_cast<KWin::CustomTile *>(tile)) {
+                    const QString direction = QMetaEnum::fromType<KWin::Tile::LayoutDirection>().valueToKey(static_cast<quint64>(customTile->layoutDirection()));
+                    return QStringLiteral("Custom (%1: %2)").arg(direction, tileGeometry);
+                } else {
+                    const QString quickTileMode = QMetaEnum::fromType<KWin::QuickTileFlag>().valueToKey(tile->quickTileMode());
+                    return QStringLiteral("%1 (%2)").arg(quickTileMode, tileGeometry);
+                }
+            } else {
+                return QStringLiteral("nullptr");
+            }
+        }
+        if (value.userType() == qMetaTypeId<KWin::VirtualDesktop *>()) {
+            if (auto desktop = value.value<KWin::VirtualDesktop *>()) {
+                return desktop->name();
+            } else {
+                return QStringLiteral("nullptr");
+            }
+        }
+        if (value.userType() == qMetaTypeId<QList<KWin::VirtualDesktop *>>()) {
+            const auto desktops = value.value<QList<KWin::VirtualDesktop *>>();
+
+            QStringList result;
+            result.reserve(desktops.size());
+            for (auto *desktop : desktops) {
+                result.append(displayText(QVariant::fromValue(desktop), locale));
+            }
+            return displayText(result, locale);
         }
         if (value.userType() == qMetaTypeId<Qt::MouseButtons>()) {
             const auto buttons = value.value<Qt::MouseButtons>();
@@ -1181,61 +1289,88 @@ QModelIndex DebugConsoleModel::parent(const QModelIndex &child) const
     return QModelIndex();
 }
 
-QVariant DebugConsoleModel::propertyData(QObject *object, const QModelIndex &index, int role) const
+QVariant DebugConsoleModel::propertyData(KWin::Window *window, const QModelIndex &index, int role) const
 {
-    const auto property = object->metaObject()->property(index.row());
-    if (index.column() == 0) {
-        return property.name();
-    } else {
-        const QVariant value = property.read(object);
-        if (qstrcmp(property.name(), "windowType") == 0) {
-            switch (value.toInt()) {
-            case NET::Normal:
-                return QStringLiteral("NET::Normal");
-            case NET::Desktop:
-                return QStringLiteral("NET::Desktop");
-            case NET::Dock:
-                return QStringLiteral("NET::Dock");
-            case NET::Toolbar:
-                return QStringLiteral("NET::Toolbar");
-            case NET::Menu:
-                return QStringLiteral("NET::Menu");
-            case NET::Dialog:
-                return QStringLiteral("NET::Dialog");
-            case NET::Override:
-                return QStringLiteral("NET::Override");
-            case NET::TopMenu:
-                return QStringLiteral("NET::TopMenu");
-            case NET::Utility:
-                return QStringLiteral("NET::Utility");
-            case NET::Splash:
-                return QStringLiteral("NET::Splash");
-            case NET::DropdownMenu:
-                return QStringLiteral("NET::DropdownMenu");
-            case NET::PopupMenu:
-                return QStringLiteral("NET::PopupMenu");
-            case NET::Tooltip:
-                return QStringLiteral("NET::Tooltip");
-            case NET::Notification:
-                return QStringLiteral("NET::Notification");
-            case NET::ComboBox:
-                return QStringLiteral("NET::ComboBox");
-            case NET::DNDIcon:
-                return QStringLiteral("NET::DNDIcon");
-            case NET::OnScreenDisplay:
-                return QStringLiteral("NET::OnScreenDisplay");
-            case NET::CriticalNotification:
-                return QStringLiteral("NET::CriticalNotification");
-            case NET::AppletPopup:
-                return QStringLiteral("NET::AppletPopup");
-            case NET::Unknown:
-            default:
-                return QStringLiteral("NET::Unknown");
+    const auto property = window->metaObject()->property(index.row());
+    if (role == Qt::DisplayRole) {
+        if (index.column() == 0) {
+            return property.name();
+        } else {
+            const QVariant value = property.read(window);
+            if (qstrcmp(property.name(), "windowType") == 0) {
+                switch (value.toInt()) {
+                case NET::Normal:
+                    return QStringLiteral("NET::Normal");
+                case NET::Desktop:
+                    return QStringLiteral("NET::Desktop");
+                case NET::Dock:
+                    return QStringLiteral("NET::Dock");
+                case NET::Toolbar:
+                    return QStringLiteral("NET::Toolbar");
+                case NET::Menu:
+                    return QStringLiteral("NET::Menu");
+                case NET::Dialog:
+                    return QStringLiteral("NET::Dialog");
+                case NET::Override:
+                    return QStringLiteral("NET::Override");
+                case NET::TopMenu:
+                    return QStringLiteral("NET::TopMenu");
+                case NET::Utility:
+                    return QStringLiteral("NET::Utility");
+                case NET::Splash:
+                    return QStringLiteral("NET::Splash");
+                case NET::DropdownMenu:
+                    return QStringLiteral("NET::DropdownMenu");
+                case NET::PopupMenu:
+                    return QStringLiteral("NET::PopupMenu");
+                case NET::Tooltip:
+                    return QStringLiteral("NET::Tooltip");
+                case NET::Notification:
+                    return QStringLiteral("NET::Notification");
+                case NET::ComboBox:
+                    return QStringLiteral("NET::ComboBox");
+                case NET::DNDIcon:
+                    return QStringLiteral("NET::DNDIcon");
+                case NET::OnScreenDisplay:
+                    return QStringLiteral("NET::OnScreenDisplay");
+                case NET::CriticalNotification:
+                    return QStringLiteral("NET::CriticalNotification");
+                case NET::AppletPopup:
+                    return QStringLiteral("NET::AppletPopup");
+                case NET::Unknown:
+                default:
+                    return QStringLiteral("NET::Unknown");
+                }
+            } else if (qstrcmp(property.name(), "layer") == 0) {
+                return QMetaEnum::fromType<Layer>().valueToKey(value.value<Layer>());
             }
-        } else if (qstrcmp(property.name(), "layer") == 0) {
-            return QMetaEnum::fromType<Layer>().valueToKey(value.value<Layer>());
+            return value;
         }
-        return value;
+    } else if (role == Qt::DecorationRole) {
+        if (index.column() == 1) {
+            const QVariant value = property.read(window);
+            if (value.userType() == qMetaTypeId<QIcon>()) {
+                return value;
+            } else if (value.userType() == qMetaTypeId<KWin::Window *>()) {
+                if (auto window = value.value<KWin::Window *>()) {
+                    return window->icon();
+                }
+            } else if (qstrcmp(property.name(), "colorScheme") == 0) {
+                const QPalette palette = window->palette();
+
+                // Draw a little color scheme preview,
+                // inspired by KColorSchemeManagerPrivate::createPreview.
+                QPixmap pixmap(16, 16);
+                pixmap.fill(Qt::black);
+                QPainter painter(&pixmap);
+                constexpr int itemSize = 16 / 2 - 1;
+                painter.fillRect(1, 1, itemSize, itemSize, palette.window().color());
+                painter.fillRect(1 + itemSize, 1, itemSize, itemSize, palette.button().color());
+                painter.fillRect(1, 1 + itemSize, itemSize, itemSize, palette.base().color());
+                painter.fillRect(1 + itemSize, 1 + itemSize, itemSize, itemSize, palette.highlight().color());
+                return pixmap;
+            }
+        }
     }
     return QVariant();
 }
@@ -1279,7 +1414,7 @@ QVariant DebugConsoleModel::data(const QModelIndex &index, int role) const
         }
     }
     if (index.internalId() & s_propertyBitMask) {
-        if (index.column() >= 2 || role != Qt::DisplayRole) {
+        if (index.column() >= 2) {
             return QVariant();
         }
         if (Window *w = waylandWindow(index)) {

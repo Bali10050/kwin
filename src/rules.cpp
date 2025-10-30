@@ -55,7 +55,6 @@ Rules::Rules()
     , maximizevertrule(UnusedSetRule)
     , maximizehorizrule(UnusedSetRule)
     , minimizerule(UnusedSetRule)
-    , shaderule(UnusedSetRule)
     , skiptaskbarrule(UnusedSetRule)
     , skippagerrule(UnusedSetRule)
     , skipswitcherrule(UnusedSetRule)
@@ -136,7 +135,6 @@ void Rules::readFromSettings(const RuleSettings *settings)
     READ_SET_RULE(maximizevert);
     READ_SET_RULE(maximizehoriz);
     READ_SET_RULE(minimize);
-    READ_SET_RULE(shade);
     READ_SET_RULE(skiptaskbar);
     READ_SET_RULE(skippager);
     READ_SET_RULE(skipswitcher);
@@ -151,8 +149,8 @@ void Rules::readFromSettings(const RuleSettings *settings)
     }
 
     READ_FORCE_RULE(blockcompositing, );
-    READ_FORCE_RULE(fsplevel, );
-    READ_FORCE_RULE(fpplevel, );
+    READ_FORCE_RULE(fsplevel, FocusStealingPreventionLevel);
+    READ_FORCE_RULE(fpplevel, FocusStealingPreventionLevel);
     READ_FORCE_RULE(acceptfocus, );
     READ_FORCE_RULE(closeable, );
     READ_FORCE_RULE(autogroup, );
@@ -223,7 +221,6 @@ void Rules::write(RuleSettings *settings) const
     WRITE_SET_RULE(maximizevert, Maximizevert, );
     WRITE_SET_RULE(maximizehoriz, Maximizehoriz, );
     WRITE_SET_RULE(minimize, Minimize, );
-    WRITE_SET_RULE(shade, Shade, );
     WRITE_SET_RULE(skiptaskbar, Skiptaskbar, );
     WRITE_SET_RULE(skippager, Skippager, );
     WRITE_SET_RULE(skipswitcher, Skipswitcher, );
@@ -240,8 +237,11 @@ void Rules::write(RuleSettings *settings) const
     };
     WRITE_FORCE_RULE(decocolor, Decocolor, colorToString);
     WRITE_FORCE_RULE(blockcompositing, Blockcompositing, );
-    WRITE_FORCE_RULE(fsplevel, Fsplevel, );
-    WRITE_FORCE_RULE(fpplevel, Fpplevel, );
+    const auto focusStealingLevelToInt = [](FocusStealingPreventionLevel fsp) {
+        return int(fsp);
+    };
+    WRITE_FORCE_RULE(fsplevel, Fsplevel, focusStealingLevelToInt);
+    WRITE_FORCE_RULE(fpplevel, Fpplevel, focusStealingLevelToInt);
     WRITE_FORCE_RULE(acceptfocus, Acceptfocus, );
     WRITE_FORCE_RULE(closeable, Closeable, );
     WRITE_FORCE_RULE(autogroup, Autogroup, );
@@ -276,7 +276,6 @@ bool Rules::isEmpty() const
         && maximizevertrule == UnusedSetRule
         && maximizehorizrule == UnusedSetRule
         && minimizerule == UnusedSetRule
-        && shaderule == UnusedSetRule
         && skiptaskbarrule == UnusedSetRule
         && skippagerrule == UnusedSetRule
         && skipswitcherrule == UnusedSetRule
@@ -550,10 +549,6 @@ bool Rules::update(Window *c, int selection)
         updated = updated || minimize != c->isMinimized();
         minimize = c->isMinimized();
     }
-    if NOW_REMEMBER (Shade, shade) {
-        updated = updated || (shade != (c->shadeMode() != ShadeNone));
-        shade = c->shadeMode() != ShadeNone;
-    }
     if NOW_REMEMBER (SkipTaskbar, skiptaskbar) {
         updated = updated || skiptaskbar != c->skipTaskbar();
         skiptaskbar = c->skipTaskbar();
@@ -681,20 +676,6 @@ bool Rules::applyMaximizeVert(MaximizeMode &mode, bool init) const
 }
 
 APPLY_RULE(minimize, Minimize, bool)
-
-bool Rules::applyShade(ShadeMode &sh, bool init) const
-{
-    if (checkSetRule(shaderule, init)) {
-        if (!this->shade) {
-            sh = ShadeNone;
-        }
-        if (this->shade && sh == ShadeNone) {
-            sh = ShadeNormal;
-        }
-    }
-    return checkSetStop(shaderule);
-}
-
 APPLY_RULE(skiptaskbar, SkipTaskbar, bool)
 APPLY_RULE(skippager, SkipPager, bool)
 APPLY_RULE(skipswitcher, SkipSwitcher, bool)
@@ -704,8 +685,8 @@ APPLY_RULE(fullscreen, FullScreen, bool)
 APPLY_RULE(noborder, NoBorder, bool)
 APPLY_FORCE_RULE(decocolor, DecoColor, QString)
 APPLY_FORCE_RULE(blockcompositing, BlockCompositing, bool)
-APPLY_FORCE_RULE(fsplevel, FSP, int)
-APPLY_FORCE_RULE(fpplevel, FPP, int)
+APPLY_FORCE_RULE(fsplevel, FSP, FocusStealingPreventionLevel)
+APPLY_FORCE_RULE(fpplevel, FPP, FocusStealingPreventionLevel)
 APPLY_FORCE_RULE(acceptfocus, AcceptFocus, bool)
 APPLY_FORCE_RULE(closeable, Closeable, bool)
 APPLY_FORCE_RULE(autogroup, Autogrouping, bool)
@@ -753,7 +734,6 @@ bool Rules::discardUsed(bool withdrawn)
     DISCARD_USED_SET_RULE(maximizevert);
     DISCARD_USED_SET_RULE(maximizehoriz);
     DISCARD_USED_SET_RULE(minimize);
-    DISCARD_USED_SET_RULE(shade);
     DISCARD_USED_SET_RULE(skiptaskbar);
     DISCARD_USED_SET_RULE(skippager);
     DISCARD_USED_SET_RULE(skipswitcher);
@@ -902,7 +882,6 @@ Output *WindowRules::checkOutput(Output *output, bool init) const
 }
 
 CHECK_RULE(Minimize, bool)
-CHECK_RULE(Shade, ShadeMode)
 CHECK_RULE(SkipTaskbar, bool)
 CHECK_RULE(SkipPager, bool)
 CHECK_RULE(SkipSwitcher, bool)
@@ -912,8 +891,8 @@ CHECK_RULE(FullScreen, bool)
 CHECK_RULE(NoBorder, bool)
 CHECK_FORCE_RULE(DecoColor, QString)
 CHECK_FORCE_RULE(BlockCompositing, bool)
-CHECK_FORCE_RULE(FSP, int)
-CHECK_FORCE_RULE(FPP, int)
+CHECK_FORCE_RULE(FSP, FocusStealingPreventionLevel)
+CHECK_FORCE_RULE(FPP, FocusStealingPreventionLevel)
 CHECK_FORCE_RULE(AcceptFocus, bool)
 CHECK_FORCE_RULE(Closeable, bool)
 CHECK_FORCE_RULE(Autogrouping, bool)

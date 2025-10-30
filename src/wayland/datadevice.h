@@ -84,9 +84,7 @@ public:
 
     SeatInterface *seat() const;
 
-    DataSourceInterface *selection() const;
-
-    void sendSelection(KWin::AbstractDataSource *other);
+    DataOfferInterface *sendSelection(KWin::AbstractDataSource *other);
     /**
      * The event is sent when a drag-and-drop operation is ended because the implicit grab is removed.
      */
@@ -102,13 +100,14 @@ public:
      * @param surface The SurfaceInterface which gets motion events
      * @param serial The serial to be used for enter/leave
      */
-    void updateDragTarget(SurfaceInterface *surface, quint32 serial) override;
+    void updateDragTarget(SurfaceInterface *surface, const QPointF &position, quint32 serial) override;
+    void motion(const QPointF &position) override;
 
     wl_client *client();
 
 Q_SIGNALS:
     void aboutToBeDestroyed();
-    void dragStarted(AbstractDataSource *source, SurfaceInterface *originSurface, quint32 serial, DragAndDropIcon *dragIcon);
+    void dragRequested(AbstractDataSource *source, SurfaceInterface *originSurface, quint32 serial, DragAndDropIcon *dragIcon);
     void selectionChanged(KWin::DataSourceInterface *, quint32 serial);
 
 private:

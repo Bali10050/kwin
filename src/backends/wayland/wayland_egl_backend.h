@@ -9,10 +9,10 @@
 */
 #pragma once
 
-#include "core/outputlayer.h"
 #include "opengl/eglbackend.h"
 #include "opengl/eglnativefence.h"
 #include "utils/damagejournal.h"
+#include "wayland_layer.h"
 
 #include <memory>
 
@@ -32,20 +32,19 @@ class WaylandBackend;
 class WaylandOutput;
 class WaylandEglBackend;
 
-class WaylandEglPrimaryLayer : public OutputLayer
+class WaylandEglLayer : public WaylandLayer
 {
 public:
-    WaylandEglPrimaryLayer(WaylandOutput *output, WaylandEglBackend *backend);
-    ~WaylandEglPrimaryLayer() override;
+    WaylandEglLayer(WaylandOutput *output, WaylandEglBackend *backend, OutputLayerType type, int zpos);
+    ~WaylandEglLayer() override;
 
     GLFramebuffer *fbo() const;
-    std::shared_ptr<GLTexture> texture() const;
-
     std::optional<OutputLayerBeginFrameInfo> doBeginFrame() override;
     bool doEndFrame(const QRegion &renderedRegion, const QRegion &damagedRegion, OutputFrame *frame) override;
-    bool doImportScanoutBuffer(GraphicsBuffer *buffer, const ColorDescription &color, RenderingIntent intent, const std::shared_ptr<OutputFrame> &frame) override;
+    bool importScanoutBuffer(GraphicsBuffer *buffer, const std::shared_ptr<OutputFrame> &frame) override;
     DrmDevice *scanoutDevice() const override;
     QHash<uint32_t, QList<uint64_t>> supportedDrmFormats() const override;
+    void releaseBuffers() override;
 
 private:
     DamageJournal m_damageJournal;
@@ -69,6 +68,7 @@ public:
     bool doEndFrame(const QRegion &renderedRegion, const QRegion &damagedRegion, OutputFrame *frame) override;
     DrmDevice *scanoutDevice() const override;
     QHash<uint32_t, QList<uint64_t>> supportedDrmFormats() const override;
+    void releaseBuffers() override;
 
 private:
     WaylandEglBackend *m_backend;
@@ -100,25 +100,15 @@ public:
     DrmDevice *drmDevice() const override;
 
     void init() override;
-    OutputLayer *primaryLayer(Output *output) override;
-    OutputLayer *cursorLayer(Output *output) override;
-
-    std::pair<std::shared_ptr<KWin::GLTexture>, ColorDescription> textureForOutput(KWin::Output *output) const override;
+    QList<OutputLayer *> compatibleOutputLayers(Output *output) override;
 
 private:
     bool initializeEgl();
     bool initRenderingContext();
-    bool createEglWaylandOutput(Output *output);
+    void createOutputLayers(Output *output);
     void cleanupSurfaces() override;
 
-    struct Layers
-    {
-        std::unique_ptr<WaylandEglPrimaryLayer> primaryLayer;
-        std::unique_ptr<WaylandEglCursorLayer> cursorLayer;
-    };
-
     WaylandBackend *m_backend;
-    std::map<Output *, Layers> m_outputs;
 };
 
 } // namespace Wayland

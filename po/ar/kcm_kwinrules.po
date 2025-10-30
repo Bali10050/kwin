@@ -9,7 +9,7 @@ msgstr ""
 "Project-Id-Version: kcmkwinrules\n"
 "Report-Msgid-Bugs-To: https://bugs.kde.org\n"
 "POT-Creation-Date: 2025-05-24 00:43+0000\n"
-"PO-Revision-Date: 2025-05-04 06:22+0400\n"
+"PO-Revision-Date: 2025-08-14 13:08+0400\n"
 "Last-Translator: Zayed Al-Saidi <zayed.alsaidi@gmail.com>\n"
 "Language-Team: ar\n"
 "Language: ar\n"
@@ -17,7 +17,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=6; plural=n==0 ? 0 : n==1 ? 1 : n==2 ? 2 : n%100>=3 "
-"&& n%100<=10 ? 3 : n%100>=11 && n%100<=99 ? 4 : 5;\n"
+"&& n%100<=10 ? 3 : n%100>=11 ? 4 : 5;\n"
 "X-Generator: Lokalize 23.08.5\n"
 
 #: kcmrules.cpp:228
@@ -96,8 +96,8 @@ msgid ""
 "The value of the window property will be remembered and, every time the "
 "window is created, the last remembered value will be applied."
 msgstr ""
-"سيتم تذكر قيمة خاصية النافذة، وفي كل مرة يتم فيها إنشاء النافذة، سيطبق آخر "
-"قيمة محفوظة."
+"ستُحفظ قيمة خاصية النافذة، وفي كل مرة تُنشئ فيها النافذة، سيطبق آخر قيمة "
+"محفوظة."
 
 #: optionsmodel.cpp:217
 #, kde-format
@@ -111,7 +111,7 @@ msgid ""
 "for it will be used.\n"
 "Specifying this will block more generic window settings from taking effect."
 msgstr ""
-"لن تتأثر خاصية النافذة وبالتالي ستستعمل المعالجة الافتراضية لها. \n"
+"لن تتأثر خاصية النافذة وبالتالي ستستعمل المعالجة المبدئية لها. \n"
 "سيؤدي تحديد هذا إلى منع المزيد من إعدادات النافذة العامة من أن تصبح سارية "
 "المفعول."
 
@@ -160,7 +160,7 @@ msgid ""
 msgstr ""
 "لقد حددت أن صنف النافذة غير مهم.\n"
 "هذا يعني أنه من الممكن أن تطبق الإعدادات على نوافذ من جميع التطبيقات. إذا "
-"كنت تريد فعلا إنشاء إعداد عام ، فإنه من الموصى أن تحدد أنواع النوافذ لمنع "
+"كنت تريد فعلا إنشاء إعداد عام، فإنه من الموصى أن تحدد أنواع النوافذ لمنع "
 "أنواع النوافذ الخاصة."
 
 #: rulesmodel.cpp:253
@@ -170,9 +170,9 @@ msgid ""
 "initial settings for size and position. To enforce these settings, also "
 "force the property \"%1\" to \"Yes\"."
 msgstr ""
-"تقوم بعض التطبيقات بتعيين الشكل الهندسي الخاص بها بعد البدء ، مما يؤدي إلى "
-"تجاوز الإعدادات الأولية للحجم والموضع. لفرض هذه الإعدادات ، قم أيضًا بفرض "
-"الخاصية \"‏%1\" على \"نعم\"."
+"تقوم بعض التطبيقات بتعيين الشكل الهندسي الخاص بها بعد البدء، مما يؤدي إلى "
+"تجاوز الإعدادات الأولية للحجم والموضع. لفرض هذه الإعدادات، اجعل أيضًا الخاصية "
+"\"‏%1\" على \"نعم\"."
 
 #: rulesmodel.cpp:260
 #, kde-format
@@ -180,7 +180,7 @@ msgid ""
 "Readability may be impaired with extremely low opacity values. At 0%, the "
 "window becomes invisible."
 msgstr ""
-"قد تكون قابلية القراءة ضعيفة مع قيم عتامة منخفضة للغاية. في 0٪، تصبح النافذة "
+"قد تكون قابلية القراءة ضعيفة مع قيم عتمة منخفضة للغاية. في 0٪، تصبح النافذة "
 "غير مرئية."
 
 #: rulesmodel.cpp:387
@@ -415,7 +415,7 @@ msgstr "الاختصار"
 #: rulesmodel.cpp:606
 #, kde-format
 msgid "No titlebar and frame"
-msgstr "بدون شريط العنوان والإطار"
+msgstr "بلا شريط العنوان والإطار"
 
 #: rulesmodel.cpp:606 rulesmodel.cpp:611 rulesmodel.cpp:617 rulesmodel.cpp:622
 #: rulesmodel.cpp:628 rulesmodel.cpp:655 rulesmodel.cpp:683 rulesmodel.cpp:689
@@ -466,7 +466,7 @@ msgid ""
 "currently-focused window.</item><item><emphasis strong='true'>Extreme:</"
 "emphasis> The window will never be raised and focused.</item></list>"
 msgstr ""
-"حاول كوين منع النوافذ المفتوحة بدون تدخل مباشر من المستخدم من الارتفاع "
+"حاول كوين منع النوافذ المفتوحة دون تدخل مباشر من المستخدم من الارتفاع "
 "والتركيز بينما أنت تتفاعل مع نافذة أخرى في نفس الوقت. يمكن استخدام هذه "
 "الخاصية لتغيير مستوى مانع سرقة التركيز المطبق على النوافذ والتطبيقات الفردية."
 "<nl/><nl/>هنا ما سيحدث للنافذة التي فُتحت دون تدخل مباشر منك عند كل مستوى "
@@ -690,7 +690,7 @@ msgstr "اجعل النافذة متوفرة على كلّ الأنشطة"
 #: rulesmodel.cpp:878
 #, kde-format
 msgid "Default"
-msgstr "افتراضي"
+msgstr "مبدئي"
 
 #: rulesmodel.cpp:879
 #, kde-format
@@ -730,12 +730,12 @@ msgstr "تحت الفأرة"
 #: rulesmodel.cpp:886
 #, kde-format
 msgid "On main window"
-msgstr "على النافذة الرئيسية"
+msgstr "على النافذة الرئيسة"
 
 #: rulesmodel.cpp:893
 #, kde-format
 msgid "None"
-msgstr "بلا"
+msgstr "لا شيء"
 
 #: rulesmodel.cpp:894
 #, kde-format
@@ -770,7 +770,7 @@ msgstr "أعلى"
 #: rulesmodel.cpp:926
 #, kde-format
 msgid "Notification"
-msgstr "إخطار"
+msgstr "إشعار"
 
 #: rulesmodel.cpp:928
 #, kde-format

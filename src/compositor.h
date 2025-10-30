@@ -24,14 +24,15 @@ namespace KWin
 class ColorDescription;
 class GLTexture;
 class Output;
-class CursorScene;
 class RenderBackend;
-class RenderLayer;
+class OutputLayer;
 class RenderLoop;
 class RenderTarget;
 class WorkspaceScene;
 class Window;
 class OutputFrame;
+class SceneView;
+class ItemView;
 
 class KWIN_EXPORT Compositor : public QObject
 {
@@ -68,18 +69,12 @@ public:
     {
         return m_scene.get();
     }
-    CursorScene *cursorScene() const
-    {
-        return m_cursorScene.get();
-    }
     RenderBackend *backend() const
     {
         return m_backend.get();
     }
 
     void createRenderer();
-
-    std::pair<std::shared_ptr<GLTexture>, ColorDescription> textureForOutput(Output *output) const;
 
 Q_SIGNALS:
     void compositingToggled(bool active);
@@ -101,27 +96,21 @@ private Q_SLOTS:
 protected:
     Output *findOutput(RenderLoop *loop) const;
 
-    void addSuperLayer(RenderLayer *layer);
-    void removeSuperLayer(RenderLayer *layer);
-
-    void prePaintPass(RenderLayer *layer, QRegion *damage);
-    void postPaintPass(RenderLayer *layer);
-    void paintPass(RenderLayer *layer, const RenderTarget &renderTarget, const QRegion &region);
-    void framePass(RenderLayer *layer, OutputFrame *frame);
-
     void createScene();
     bool attemptOpenGLCompositing();
     bool attemptQPainterCompositing();
     void addOutput(Output *output);
     void removeOutput(Output *output);
+    void assignOutputLayers(Output *output);
 
     CompositingType m_selectedCompositor = NoCompositing;
 
     State m_state = State::Off;
     std::unique_ptr<WorkspaceScene> m_scene;
-    std::unique_ptr<CursorScene> m_cursorScene;
     std::unique_ptr<RenderBackend> m_backend;
-    QHash<RenderLoop *, RenderLayer *> m_superlayers;
+    std::unordered_map<RenderLoop *, std::unique_ptr<SceneView>> m_primaryViews;
+    std::unordered_map<RenderLoop *, std::unordered_map<OutputLayer *, std::unique_ptr<ItemView>>> m_overlayViews;
+    std::unordered_set<RenderLoop *> m_brokenCursors;
 };
 
 } // namespace KWin

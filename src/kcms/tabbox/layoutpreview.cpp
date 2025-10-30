@@ -10,6 +10,7 @@
 // own
 #include "layoutpreview.h"
 
+#include <KLocalizedQmlContext>
 #include <KLocalizedString>
 #include <QCommandLineParser>
 #include <QDebug>
@@ -60,6 +61,8 @@ LayoutPreview::LayoutPreview(const QString &path, bool showDesktopThumbnail, QOb
     , m_item(nullptr)
 {
     QQmlEngine *engine = new QQmlEngine(this);
+    engine->setProperty("_kirigamiTheme", QStringLiteral("KirigamiPlasmaStyle"));
+    KLocalization::setupLocalizedContext(engine);
     QQmlComponent *component = new QQmlComponent(engine, this);
 
     qmlRegisterType<WindowThumbnailItem>("org.kde.kwin", 3, 0, "WindowThumbnail");
@@ -171,7 +174,7 @@ void ExampleClientModel::init()
 
 void ExampleClientModel::showDesktopThumbnail(bool showDesktop)
 {
-    const ThumbnailInfo desktopThumbnail = ThumbnailInfo{WindowThumbnailItem::Desktop, i18n("Show Desktop"), QStringLiteral("desktop")};
+    const ThumbnailInfo desktopThumbnail = ThumbnailInfo{WindowThumbnailItem::Desktop, i18n("Peek at Desktop"), QStringLiteral("desktop")};
     const int desktopIndex = m_thumbnails.indexOf(desktopThumbnail);
     if (showDesktop == (desktopIndex >= 0)) {
         return;

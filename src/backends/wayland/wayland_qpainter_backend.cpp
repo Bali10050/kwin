@@ -26,7 +26,7 @@ namespace Wayland
 {
 
 WaylandQPainterPrimaryLayer::WaylandQPainterPrimaryLayer(WaylandOutput *output, WaylandQPainterBackend *backend)
-    : OutputLayer(output)
+    : WaylandLayer(output, OutputLayerType::Primary, 0)
     , m_waylandOutput(output)
     , m_backend(backend)
 {
@@ -43,7 +43,7 @@ QRegion WaylandQPainterPrimaryLayer::accumulateDamage(int bufferAge) const
 
 std::optional<OutputLayerBeginFrameInfo> WaylandQPainterPrimaryLayer::doBeginFrame()
 {
-    const QSize nativeSize(m_waylandOutput->modeSize());
+    const QSize nativeSize = targetRect().size();
     if (!m_swapchain || m_swapchain->size() != nativeSize) {
         m_swapchain = std::make_unique<QPainterSwapchain>(m_backend->graphicsBufferAllocator(), nativeSize, DRM_FORMAT_XRGB8888);
     }
@@ -55,7 +55,7 @@ std::optional<OutputLayerBeginFrameInfo> WaylandQPainterPrimaryLayer::doBeginFra
 
     m_renderTime = std::make_unique<CpuRenderTimeQuery>();
     return OutputLayerBeginFrameInfo{
-        .renderTarget = RenderTarget(m_back->view()->image(), m_output->colorDescription()),
+        .renderTarget = RenderTarget(m_back->view()->image(), m_color),
         .repaint = accumulateDamage(m_back->age()),
     };
 }
@@ -65,7 +65,7 @@ bool WaylandQPainterPrimaryLayer::doEndFrame(const QRegion &renderedRegion, cons
     m_renderTime->end();
     frame->addRenderTimeQuery(std::move(m_renderTime));
     m_damageJournal.add(damagedRegion);
-    m_waylandOutput->setPrimaryBuffer(m_waylandOutput->backend()->importBuffer(m_back->buffer()));
+    setBuffer(m_waylandOutput->backend()->importBuffer(m_back->buffer()), damagedRegion);
     m_swapchain->release(m_back);
     return true;
 }
@@ -80,8 +80,14 @@ QHash<uint32_t, QList<uint64_t>> WaylandQPainterPrimaryLayer::supportedDrmFormat
     return {{DRM_FORMAT_ARGB8888, {DRM_FORMAT_MOD_LINEAR}}};
 }
 
+void WaylandQPainterPrimaryLayer::releaseBuffers()
+{
+    m_back.reset();
+    m_swapchain.reset();
+}
+
 WaylandQPainterCursorLayer::WaylandQPainterCursorLayer(WaylandOutput *output, WaylandQPainterBackend *backend)
-    : OutputLayer(output)
+    : OutputLayer(output, OutputLayerType::CursorOnly)
     , m_backend(backend)
 {
 }
@@ -92,8 +98,7 @@ WaylandQPainterCursorLayer::~WaylandQPainterCursorLayer()
 
 std::optional<OutputLayerBeginFrameInfo> WaylandQPainterCursorLayer::doBeginFrame()
 {
-    const auto tmp = targetRect().size().expandedTo(QSize(64, 64));
-    const QSize bufferSize(std::ceil(tmp.width()), std::ceil(tmp.height()));
+    const auto bufferSize = targetRect().size();
     if (!m_swapchain || m_swapchain->size() != bufferSize) {
         m_swapchain = std::make_unique<QPainterSwapchain>(m_backend->graphicsBufferAllocator(), bufferSize, DRM_FORMAT_ARGB8888);
     }
@@ -112,13 +117,14 @@ std::optional<OutputLayerBeginFrameInfo> WaylandQPainterCursorLayer::doBeginFram
 
 bool WaylandQPainterCursorLayer::doEndFrame(const QRegion &renderedRegion, const QRegion &damagedRegion, OutputFrame *frame)
 {
+    m_renderTime->end();
     if (frame) {
         frame->addRenderTimeQuery(std::move(m_renderTime));
     }
-    wl_buffer *buffer = static_cast<WaylandOutput *>(m_output)->backend()->importBuffer(m_back->buffer());
+    wl_buffer *buffer = static_cast<WaylandOutput *>(m_output.get())->backend()->importBuffer(m_back->buffer());
     Q_ASSERT(buffer);
 
-    static_cast<WaylandOutput *>(m_output)->cursor()->update(buffer, m_back->buffer()->size() / m_output->scale(), hotspot().toPoint());
+    static_cast<WaylandOutput *>(m_output.get())->cursor()->update(buffer, m_back->buffer()->size() / m_output->scale(), hotspot().toPoint());
     m_swapchain->release(m_back);
     return true;
 }
@@ -133,32 +139,39 @@ QHash<uint32_t, QList<uint64_t>> WaylandQPainterCursorLayer::supportedDrmFormats
     return {{DRM_FORMAT_ARGB8888, {DRM_FORMAT_MOD_LINEAR}}};
 }
 
+void WaylandQPainterCursorLayer::releaseBuffers()
+{
+    m_back.reset();
+    m_swapchain.reset();
+}
+
 WaylandQPainterBackend::WaylandQPainterBackend(Wayland::WaylandBackend *b)
     : QPainterBackend()
     , m_backend(b)
     , m_allocator(std::make_unique<ShmGraphicsBufferAllocator>())
 {
-
     const auto waylandOutputs = m_backend->waylandOutputs();
     for (auto *output : waylandOutputs) {
         createOutput(output);
     }
     connect(m_backend, &WaylandBackend::outputAdded, this, &WaylandQPainterBackend::createOutput);
-    connect(m_backend, &WaylandBackend::outputRemoved, this, [this](Output *waylandOutput) {
-        m_outputs.erase(waylandOutput);
-    });
 }
 
 WaylandQPainterBackend::~WaylandQPainterBackend()
 {
+    const auto waylandOutputs = m_backend->waylandOutputs();
+    for (auto *output : waylandOutputs) {
+        output->setOutputLayers({});
+    }
 }
 
-void WaylandQPainterBackend::createOutput(Output *waylandOutput)
+void WaylandQPainterBackend::createOutput(Output *output)
 {
-    m_outputs[waylandOutput] = Layers{
-        .primaryLayer = std::make_unique<WaylandQPainterPrimaryLayer>(static_cast<WaylandOutput *>(waylandOutput), this),
-        .cursorLayer = std::make_unique<WaylandQPainterCursorLayer>(static_cast<WaylandOutput *>(waylandOutput), this),
-    };
+    const auto waylandOutput = static_cast<WaylandOutput *>(output);
+    std::vector<std::unique_ptr<OutputLayer>> layers;
+    layers.push_back(std::make_unique<WaylandQPainterPrimaryLayer>(waylandOutput, this));
+    layers.push_back(std::make_unique<WaylandQPainterCursorLayer>(waylandOutput, this));
+    waylandOutput->setOutputLayers(std::move(layers));
 }
 
 GraphicsBufferAllocator *WaylandQPainterBackend::graphicsBufferAllocator() const
@@ -166,16 +179,10 @@ GraphicsBufferAllocator *WaylandQPainterBackend::graphicsBufferAllocator() const
     return m_allocator.get();
 }
 
-OutputLayer *WaylandQPainterBackend::primaryLayer(Output *output)
+QList<OutputLayer *> WaylandQPainterBackend::compatibleOutputLayers(Output *output)
 {
-    return m_outputs[output].primaryLayer.get();
+    return static_cast<WaylandOutput *>(output)->outputLayers();
 }
-
-OutputLayer *WaylandQPainterBackend::cursorLayer(Output *output)
-{
-    return m_outputs[output].cursorLayer.get();
-}
-
 }
 }
 

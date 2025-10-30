@@ -41,15 +41,11 @@ public:
     };
 
     SessionManager(QObject *parent);
-    ~SessionManager() override;
 
     SessionState state() const;
 
-    void loadSubSessionInfo(const QString &name);
-
 #if KWIN_BUILD_X11
-    void storeSubSession(const QString &name, QSet<QByteArray> sessionIds);
-    SessionInfo *takeSessionInfo(X11Window *);
+    std::optional<SessionInfo> takeSessionInfo(X11Window *);
 #endif
 
 Q_SIGNALS:
@@ -84,7 +80,7 @@ private:
     int m_sessionActiveClient;
     int m_sessionDesktop;
 
-    QList<SessionInfo *> session;
+    QList<SessionInfo> session;
     QList<XdgToplevelWindow *> m_pendingWindows;
     QTimer m_closeTimer;
     QTimer m_logoutAnywayTimer;
@@ -109,7 +105,6 @@ struct SessionInfo
     int desktop;
     bool minimized;
     bool onAllDesktops;
-    bool shaded;
     bool keepAbove;
     bool keepBelow;
     bool skipTaskbar;
@@ -123,6 +118,8 @@ struct SessionInfo
     float opacity;
 
     QStringList activities;
+
+    bool operator==(const SessionInfo &) const = default;
 };
 
 } // namespace

@@ -18,7 +18,7 @@ namespace KWin
 class EglBackend;
 class GLTexture;
 class QPainterBackend;
-class SurfacePixmap;
+class SurfaceTexture;
 class Window;
 
 /**
@@ -44,6 +44,8 @@ public:
     QSize bufferSize() const;
     void setBufferSize(const QSize &size);
 
+    bool hasAlphaChannel() const;
+
     std::shared_ptr<SyncReleasePoint> bufferReleasePoint() const;
 
     QRegion mapFromBuffer(const QRegion &region) const;
@@ -52,9 +54,9 @@ public:
     void resetDamage();
     QRegion damage() const;
 
-    void destroyPixmap();
+    void destroyTexture();
 
-    SurfacePixmap *pixmap() const;
+    SurfaceTexture *texture() const;
 
     virtual ContentType contentType() const;
     virtual void setScanoutHint(DrmDevice *device, const QHash<uint32_t, QList<uint64_t>> &drmFormats);
@@ -64,8 +66,8 @@ public:
     /**
      * like frameTimeEstimation, but takes child items into account
      */
-    std::chrono::nanoseconds recursiveFrameTimeEstimation() const;
-    std::chrono::nanoseconds frameTimeEstimation() const;
+    std::optional<std::chrono::nanoseconds> recursiveFrameTimeEstimation() const;
+    std::optional<std::chrono::nanoseconds> frameTimeEstimation() const;
 
 Q_SIGNALS:
     void damaged();
@@ -83,10 +85,11 @@ protected:
     QRectF m_bufferSourceBox;
     QSize m_bufferSize;
     QSizeF m_destinationSize;
-    std::unique_ptr<SurfacePixmap> m_pixmap;
+    bool m_hasAlphaChannel = false;
+    std::unique_ptr<SurfaceTexture> m_texture;
     std::deque<std::chrono::nanoseconds> m_lastDamageTimeDiffs;
     std::optional<std::chrono::steady_clock::time_point> m_lastDamage;
-    std::chrono::nanoseconds m_frameTimeEstimation = std::chrono::days(1000);
+    std::optional<std::chrono::nanoseconds> m_frameTimeEstimation;
     std::shared_ptr<SyncReleasePoint> m_bufferReleasePoint;
 };
 
@@ -99,36 +102,12 @@ public:
 
     virtual bool create() = 0;
     virtual void update(const QRegion &region) = 0;
-};
 
-/**
- * TODO: Drop SurfacePixmap after kwin_wayland and kwin_x11 are split.
- */
-class KWIN_EXPORT SurfacePixmap : public QObject
-{
-    Q_OBJECT
-
-public:
-    explicit SurfacePixmap(SurfaceItem *item);
-
-    SurfaceItem *item() const;
-    SurfaceTexture *texture() const;
-
-    bool hasAlphaChannel() const;
+    // TODO: create()/update() steps are unnecessary now, consider removing size().
     QSize size() const;
 
-    void create();
-    void update();
-    bool isValid() const;
-
 protected:
-    SurfaceItem *m_item;
     QSize m_size;
-    bool m_valid = false;
-    bool m_hasAlphaChannel = false;
-
-private:
-    std::unique_ptr<SurfaceTexture> m_texture;
 };
 
 class KWIN_EXPORT OpenGLSurfaceContents
@@ -154,6 +133,7 @@ public:
     {
         return !planes.isEmpty();
     }
+    QVarLengthArray<GLTexture *, 4> toVarLengthArray() const;
 
     QList<std::shared_ptr<GLTexture>> planes;
 };
@@ -161,7 +141,7 @@ public:
 class KWIN_EXPORT OpenGLSurfaceTexture : public SurfaceTexture
 {
 public:
-    explicit OpenGLSurfaceTexture(EglBackend *backend, SurfacePixmap *pixmap);
+    explicit OpenGLSurfaceTexture(EglBackend *backend, SurfaceItem *item);
     ~OpenGLSurfaceTexture() override;
 
     bool create() override;
@@ -188,14 +168,14 @@ private:
 
     BufferType m_bufferType = BufferType::None;
     EglBackend *m_backend;
-    SurfacePixmap *m_pixmap;
+    SurfaceItem *m_item;
     OpenGLSurfaceContents m_texture;
 };
 
 class KWIN_EXPORT QPainterSurfaceTexture : public SurfaceTexture
 {
 public:
-    QPainterSurfaceTexture(QPainterBackend *backend, SurfacePixmap *pixmap);
+    QPainterSurfaceTexture(QPainterBackend *backend, SurfaceItem *item);
 
     bool create() override;
     void update(const QRegion &region) override;
@@ -206,8 +186,18 @@ public:
 
 protected:
     QPainterBackend *m_backend;
-    SurfacePixmap *m_pixmap;
+    SurfaceItem *m_item;
     QImage m_image;
 };
+
+inline QVarLengthArray<GLTexture *, 4> OpenGLSurfaceContents::toVarLengthArray() const
+{
+    Q_ASSERT(planes.size() <= 4);
+    QVarLengthArray<GLTexture *, 4> ret;
+    for (const auto &plane : planes) {
+        ret << plane.get();
+    }
+    return ret;
+}
 
 } // namespace KWin

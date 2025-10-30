@@ -498,7 +498,7 @@ void RulesModel::populateRuleList()
                                          QIcon::fromTheme("activities")));
     activity->setOptionsData(activitiesModelData());
 
-    // Activites consumer may update the available activities later
+    // Activities consumer may update the available activities later
     auto updateActivities = [this]() {
         m_rules["activity"]->setOptionsData(activitiesModelData());
         const QModelIndex index = indexOf("activity");
@@ -858,7 +858,7 @@ QList<OptionsModel::Data> RulesModel::activitiesModelData() const
         OptionsModel::ExclusiveOption,
     };
 
-    const auto activities = m_activities->activities(KActivities::Info::Running);
+    const auto activities = m_activities->activities();
     if (m_activities->serviceStatus() == KActivities::Consumer::Running) {
         for (const QString &activityId : activities) {
             const KActivities::Info info(activityId);

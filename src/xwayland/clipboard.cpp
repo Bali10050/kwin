@@ -11,6 +11,7 @@
 #include "datasource.h"
 #include "selection_source.h"
 
+#include "main.h"
 #include "wayland/display.h"
 #include "wayland/seat.h"
 #include "wayland_server.h"
@@ -47,22 +48,8 @@ Clipboard::Clipboard(xcb_atom_t atom, QObject *parent)
     registerXfixes();
     xcb_flush(xcbConn);
 
-    connect(waylandServer()->seat(), &SeatInterface::selectionChanged,
-            this, &Clipboard::wlSelectionChanged);
-}
-
-void Clipboard::wlSelectionChanged(AbstractDataSource *dsi)
-{
-    if (!ownsSelection(dsi)) {
-        // Wayland native window provides new selection
-        if (!m_checkConnection) {
-            m_checkConnection = connect(workspace(), &Workspace::windowActivated,
-                                        this, &Clipboard::checkWlSource);
-        }
-        // remove previous source so checkWlSource() can create a new one
-        setWlSource(nullptr);
-    }
-    checkWlSource();
+    connect(waylandServer()->seat(), &SeatInterface::selectionChanged, this, &Clipboard::onSelectionChanged);
+    connect(workspace(), &Workspace::windowActivated, this, &Clipboard::onActiveWindowChanged);
 }
 
 bool Clipboard::ownsSelection(AbstractDataSource *dsi) const
@@ -70,48 +57,50 @@ bool Clipboard::ownsSelection(AbstractDataSource *dsi) const
     return dsi && dsi == m_selectionSource.get();
 }
 
-void Clipboard::checkWlSource()
+bool Clipboard::x11ClientsCanAccessSelection() const
 {
-    auto dsi = waylandServer()->seat()->selection();
-    auto removeSource = [this] {
+    return qobject_cast<X11Window *>(workspace()->activeWindow());
+}
+
+void Clipboard::onSelectionChanged()
+{
+    if (!x11ClientsCanAccessSelection()) {
+        return;
+    }
+
+    auto currentSelection = waylandServer()->seat()->selection();
+    if (!currentSelection || ownsSelection(currentSelection)) {
         if (wlSource()) {
             setWlSource(nullptr);
             ownSelection(false);
         }
-    };
+        return;
+    }
 
-    // Wayland source gets created when:
-    // - the Wl selection exists,
-    // - its source is not Xwayland,
-    // - a window is active,
-    // - this window is an Xwayland one.
-    //
-    // Otherwise the Wayland source gets destroyed to shield
-    // against snooping X windows.
-
-    if (!dsi || ownsSelection(dsi)) {
-        // Xwayland source or no source
-        disconnect(m_checkConnection);
-        m_checkConnection = QMetaObject::Connection();
-        removeSource();
-        return;
-    }
-    if (!qobject_cast<KWin::X11Window *>(workspace()->activeWindow())) {
-        // no active window or active window is Wayland native
-        removeSource();
-        return;
-    }
-    // Xwayland window is active and we need a Wayland source
-    if (wlSource()) {
-        // source already exists, nothing more to do
-        return;
-    }
-    auto *wls = new WlSource(this);
-    setWlSource(wls);
-    if (dsi) {
-        wls->setDataSourceIface(dsi);
-    }
+    setWlSource(new WlSource(currentSelection, this));
     ownSelection(true);
+}
+
+void Clipboard::onActiveWindowChanged()
+{
+    auto currentSelection = waylandServer()->seat()->selection();
+    if (!currentSelection) {
+        return;
+    }
+
+    // If the current selection is owned by an X11 client => do nothing. If the selection is
+    // owned by a Wayland client, X11 clients can access it only when they are focused.
+    if (!ownsSelection(currentSelection)) {
+        if (x11ClientsCanAccessSelection()) {
+            setWlSource(new WlSource(currentSelection, this));
+            ownSelection(true);
+        } else {
+            if (wlSource()) {
+                setWlSource(nullptr);
+                ownSelection(false);
+            }
+        }
+    }
 }
 
 void Clipboard::doHandleXfixesNotify(xcb_xfixes_selection_notify_event_t *event)
@@ -130,7 +119,7 @@ void Clipboard::x11OfferLost()
     m_selectionSource.reset();
 }
 
-void Clipboard::x11OffersChanged(const QStringList &added, const QStringList &removed)
+void Clipboard::x11TargetsReceived(const QStringList &mimeTypes)
 {
     X11Source *source = x11Source();
     if (!source) {
@@ -138,27 +127,12 @@ void Clipboard::x11OffersChanged(const QStringList &added, const QStringList &re
         return;
     }
 
-    const Mimes offers = source->offers();
-
-    if (!offers.isEmpty()) {
-        QStringList mimeTypes;
-        mimeTypes.reserve(offers.size());
-        std::transform(offers.begin(), offers.end(), std::back_inserter(mimeTypes), [](const Mimes::value_type &pair) {
-            return pair.first;
-        });
-        auto newSelection = std::make_unique<XwlDataSource>();
-        newSelection->setMimeTypes(mimeTypes);
-        connect(newSelection.get(), &XwlDataSource::dataRequested, source, &X11Source::startTransfer);
-        // we keep the old selection around because setSelection needs it to be still alive
-        std::swap(m_selectionSource, newSelection);
-        waylandServer()->seat()->setSelection(m_selectionSource.get(), waylandServer()->display()->nextSerial());
-    } else {
-        AbstractDataSource *currentSelection = waylandServer()->seat()->selection();
-        if (!ownsSelection(currentSelection)) {
-            waylandServer()->seat()->setSelection(nullptr, waylandServer()->display()->nextSerial());
-            m_selectionSource.reset();
-        }
-    }
+    auto newSelection = std::make_unique<XwlDataSource>();
+    newSelection->setMimeTypes(mimeTypes);
+    connect(newSelection.get(), &XwlDataSource::dataRequested, source, &X11Source::transferRequested);
+    // we keep the old selection around because setSelection needs it to be still alive
+    std::swap(m_selectionSource, newSelection);
+    waylandServer()->seat()->setSelection(m_selectionSource.get(), waylandServer()->display()->nextSerial());
 }
 
 } // namespace Xwl

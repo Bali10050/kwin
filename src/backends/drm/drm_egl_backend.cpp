@@ -17,6 +17,7 @@
 #include "drm_output.h"
 #include "drm_pipeline.h"
 #include "drm_virtual_egl_layer.h"
+#include "drm_virtual_output.h"
 // system
 #include <drm_fourcc.h>
 #include <gbm.h>
@@ -37,12 +38,6 @@ EglGbmBackend::EglGbmBackend(DrmBackend *drmBackend)
 EglGbmBackend::~EglGbmBackend()
 {
     m_backend->releaseBuffers();
-    const auto outputs = m_backend->outputs();
-    for (const auto output : outputs) {
-        if (auto drmOutput = dynamic_cast<DrmOutput *>(output)) {
-            drmOutput->pipeline()->setLayers(nullptr, nullptr);
-        }
-    }
     m_contexts.clear();
     cleanup();
     m_backend->setRenderBackend(nullptr);
@@ -131,39 +126,38 @@ std::shared_ptr<EglContext> EglGbmBackend::contextForGpu(DrmGpu *gpu)
     return ret;
 }
 
+void EglGbmBackend::resetContextForGpu(DrmGpu *gpu)
+{
+    m_contexts.erase(gpu->eglDisplay());
+}
+
 DrmDevice *EglGbmBackend::drmDevice() const
 {
     return gpu()->drmDevice();
 }
 
-OutputLayer *EglGbmBackend::primaryLayer(Output *output)
+QList<OutputLayer *> EglGbmBackend::compatibleOutputLayers(Output *output)
 {
-    return static_cast<DrmAbstractOutput *>(output)->primaryLayer();
-}
-
-OutputLayer *EglGbmBackend::cursorLayer(Output *output)
-{
-    return static_cast<DrmAbstractOutput *>(output)->cursorLayer();
-}
-
-std::pair<std::shared_ptr<KWin::GLTexture>, ColorDescription> EglGbmBackend::textureForOutput(Output *output) const
-{
-    const auto drmOutput = static_cast<DrmAbstractOutput *>(output);
-    if (const auto virtualLayer = dynamic_cast<VirtualEglGbmLayer *>(drmOutput->primaryLayer())) {
-        return std::make_pair(virtualLayer->texture(), virtualLayer->colorDescription());
+    if (auto virtualOutput = qobject_cast<DrmVirtualOutput *>(output)) {
+        return {virtualOutput->primaryLayer()};
+    } else {
+        return static_cast<DrmOutput *>(output)->pipeline()->gpu()->compatibleOutputLayers(output);
     }
-    const auto layer = static_cast<EglGbmLayer *>(drmOutput->primaryLayer());
-    return std::make_pair(layer->texture(), layer->colorDescription());
 }
 
-std::shared_ptr<DrmPipelineLayer> EglGbmBackend::createDrmPlaneLayer(DrmPipeline *pipeline, DrmPlane::TypeIndex type)
+std::unique_ptr<DrmPipelineLayer> EglGbmBackend::createDrmPlaneLayer(DrmPlane *plane)
 {
-    return std::make_shared<EglGbmLayer>(this, pipeline, type);
+    return std::make_unique<EglGbmLayer>(this, plane);
 }
 
-std::shared_ptr<DrmOutputLayer> EglGbmBackend::createLayer(DrmVirtualOutput *output)
+std::unique_ptr<DrmPipelineLayer> EglGbmBackend::createDrmPlaneLayer(DrmGpu *gpu, DrmPlane::TypeIndex type)
 {
-    return std::make_shared<VirtualEglGbmLayer>(this, output);
+    return std::make_unique<EglGbmLayer>(this, gpu, type);
+}
+
+std::unique_ptr<DrmOutputLayer> EglGbmBackend::createLayer(DrmVirtualOutput *output)
+{
+    return std::make_unique<VirtualEglGbmLayer>(this, output);
 }
 
 DrmGpu *EglGbmBackend::gpu() const

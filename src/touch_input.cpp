@@ -12,8 +12,10 @@
 #include "config-kwin.h"
 
 #include "decorations/decoratedwindow.h"
+#include "input_event.h"
 #include "input_event_spy.h"
 #include "pointer_input.h"
+#include "wayland/display.h"
 #include "wayland/seat.h"
 #include "wayland_server.h"
 #include "window.h"
@@ -117,9 +119,20 @@ void TouchInputRedirection::processDown(qint32 id, const QPointF &pos, std::chro
         workspace()->setActiveOutput(pos);
     }
     input()->setLastInputHandler(this);
-    input()->processSpies(std::bind(&InputEventSpy::touchDown, std::placeholders::_1, id, pos, time));
-    input()->processFilters(std::bind(&InputEventFilter::touchDown, std::placeholders::_1, id, pos, time));
+
+    TouchDownEvent event{
+        .id = id,
+        .pos = pos,
+        .time = time,
+    };
+
+    input()->processSpies(&InputEventSpy::touchDown, &event);
+    input()->processFilters(&InputEventFilter::touchDown, &event);
     m_windowUpdatedInCycle = false;
+    input()->setLastInteractionSerial(waylandServer()->seat()->display()->serial());
+    if (auto f = focus()) {
+        f->setLastUsageSerial(waylandServer()->seat()->display()->serial());
+    }
 }
 
 void TouchInputRedirection::processUp(qint32 id, std::chrono::microseconds time, InputDevice *device)
@@ -131,9 +144,15 @@ void TouchInputRedirection::processUp(qint32 id, std::chrono::microseconds time,
         return;
     }
     input()->setLastInputHandler(this);
+
+    TouchUpEvent event{
+        .id = id,
+        .time = time,
+    };
+
     m_windowUpdatedInCycle = false;
-    input()->processSpies(std::bind(&InputEventSpy::touchUp, std::placeholders::_1, id, time));
-    input()->processFilters(std::bind(&InputEventFilter::touchUp, std::placeholders::_1, id, time));
+    input()->processSpies(&InputEventSpy::touchUp, &event);
+    input()->processFilters(&InputEventFilter::touchUp, &event);
     m_windowUpdatedInCycle = false;
     if (m_activeTouchPoints.count() == 0) {
         update();
@@ -150,9 +169,16 @@ void TouchInputRedirection::processMotion(qint32 id, const QPointF &pos, std::ch
     }
     input()->setLastInputHandler(this);
     m_lastPosition = pos;
+
+    TouchMotionEvent event{
+        .id = id,
+        .pos = pos,
+        .time = time,
+    };
+
     m_windowUpdatedInCycle = false;
-    input()->processSpies(std::bind(&InputEventSpy::touchMotion, std::placeholders::_1, id, pos, time));
-    input()->processFilters(std::bind(&InputEventFilter::touchMotion, std::placeholders::_1, id, pos, time));
+    input()->processSpies(&InputEventSpy::touchMotion, &event);
+    input()->processFilters(&InputEventFilter::touchMotion, &event);
     m_windowUpdatedInCycle = false;
 }
 
@@ -167,7 +193,7 @@ void TouchInputRedirection::cancel()
     // the compositor will not receive any TOUCH_MOTION or TOUCH_UP events for that slot.
     if (!m_activeTouchPoints.isEmpty()) {
         m_activeTouchPoints.clear();
-        input()->processFilters(std::bind(&InputEventFilter::touchCancel, std::placeholders::_1));
+        input()->processFilters(&InputEventFilter::touchCancel);
     }
 }
 
@@ -176,7 +202,7 @@ void TouchInputRedirection::frame()
     if (!inited() || !waylandServer()->seat()->hasTouch()) {
         return;
     }
-    input()->processFilters(std::bind(&InputEventFilter::touchFrame, std::placeholders::_1));
+    input()->processFilters(&InputEventFilter::touchFrame);
 }
 
 }

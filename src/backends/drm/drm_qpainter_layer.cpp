@@ -22,15 +22,20 @@
 namespace KWin
 {
 
-DrmQPainterLayer::DrmQPainterLayer(DrmPipeline *pipeline, DrmPlane::TypeIndex type)
-    : DrmPipelineLayer(pipeline, type)
+DrmQPainterLayer::DrmQPainterLayer(DrmPlane *plane)
+    : DrmPipelineLayer(plane)
+{
+}
+
+DrmQPainterLayer::DrmQPainterLayer(DrmPlane::TypeIndex type)
+    : DrmPipelineLayer(type)
 {
 }
 
 std::optional<OutputLayerBeginFrameInfo> DrmQPainterLayer::doBeginFrame()
 {
     if (!doesSwapchainFit()) {
-        m_swapchain = std::make_shared<QPainterSwapchain>(m_pipeline->gpu()->drmDevice()->allocator(), targetRect().size(), m_pipeline->formats(m_type).contains(DRM_FORMAT_ARGB8888) ? DRM_FORMAT_ARGB8888 : DRM_FORMAT_XRGB8888);
+        m_swapchain = std::make_shared<QPainterSwapchain>(scanoutDevice()->allocator(), targetRect().size(), supportedDrmFormats().contains(DRM_FORMAT_ARGB8888) ? DRM_FORMAT_ARGB8888 : DRM_FORMAT_XRGB8888);
         m_damageJournal = DamageJournal();
     }
 
@@ -53,7 +58,7 @@ bool DrmQPainterLayer::doEndFrame(const QRegion &renderedRegion, const QRegion &
     if (frame) {
         frame->addRenderTimeQuery(std::move(m_renderTime));
     }
-    m_currentFramebuffer = m_pipeline->gpu()->importBuffer(m_currentBuffer->buffer(), FileDescriptor{});
+    m_currentFramebuffer = gpu()->importBuffer(m_currentBuffer->buffer(), FileDescriptor{});
     m_damageJournal.add(damagedRegion);
     m_swapchain->release(m_currentBuffer);
     if (!m_currentFramebuffer) {
@@ -62,13 +67,13 @@ bool DrmQPainterLayer::doEndFrame(const QRegion &renderedRegion, const QRegion &
     return m_currentFramebuffer != nullptr;
 }
 
-bool DrmQPainterLayer::checkTestBuffer()
+bool DrmQPainterLayer::preparePresentationTest()
 {
     if (!doesSwapchainFit()) {
-        m_swapchain = std::make_shared<QPainterSwapchain>(m_pipeline->gpu()->drmDevice()->allocator(), targetRect().size(), m_pipeline->formats(m_type).contains(DRM_FORMAT_ARGB8888) ? DRM_FORMAT_ARGB8888 : DRM_FORMAT_XRGB8888);
+        m_swapchain = std::make_shared<QPainterSwapchain>(scanoutDevice()->allocator(), targetRect().size(), supportedDrmFormats().contains(DRM_FORMAT_ARGB8888) ? DRM_FORMAT_ARGB8888 : DRM_FORMAT_XRGB8888);
         m_currentBuffer = m_swapchain->acquire();
         if (m_currentBuffer) {
-            m_currentFramebuffer = m_pipeline->gpu()->importBuffer(m_currentBuffer->buffer(), FileDescriptor{});
+            m_currentFramebuffer = gpu()->importBuffer(m_currentBuffer->buffer(), FileDescriptor{});
             m_swapchain->release(m_currentBuffer);
             if (!m_currentFramebuffer) {
                 qCWarning(KWIN_DRM, "Failed to create dumb framebuffer: %s", strerror(errno));
@@ -95,33 +100,8 @@ void DrmQPainterLayer::releaseBuffers()
     m_swapchain.reset();
 }
 
-DrmDevice *DrmQPainterLayer::scanoutDevice() const
-{
-    return m_pipeline->gpu()->drmDevice();
-}
-
-QHash<uint32_t, QList<uint64_t>> DrmQPainterLayer::supportedDrmFormats() const
-{
-    return m_pipeline->formats(m_type);
-}
-
-QList<QSize> DrmQPainterLayer::recommendedSizes() const
-{
-    return m_pipeline->recommendedSizes(m_type);
-}
-
-const ColorPipeline &DrmQPainterLayer::colorPipeline() const
-{
-    return m_colorPipeline;
-}
-
-ColorDescription DrmQPainterLayer::colorDescription() const
-{
-    return m_pipeline->output()->scanoutColorDescription();
-}
-
 DrmVirtualQPainterLayer::DrmVirtualQPainterLayer(DrmVirtualOutput *output)
-    : DrmOutputLayer(output)
+    : DrmOutputLayer(output, OutputLayerType::Primary)
 {
 }
 

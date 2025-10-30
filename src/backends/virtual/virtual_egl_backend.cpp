@@ -22,15 +22,17 @@
 namespace KWin
 {
 
+static const bool s_bufferAgeEnabled = qEnvironmentVariable("KWIN_USE_BUFFER_AGE") != QStringLiteral("0");
+
 VirtualEglLayer::VirtualEglLayer(Output *output, VirtualEglBackend *backend)
-    : OutputLayer(output)
+    : OutputLayer(output, OutputLayerType::Primary)
     , m_backend(backend)
 {
 }
 
-std::shared_ptr<GLTexture> VirtualEglLayer::texture() const
+VirtualEglLayer::~VirtualEglLayer()
 {
-    return m_current->texture();
+    m_backend->openglContext()->makeCurrent();
 }
 
 std::optional<OutputLayerBeginFrameInfo> VirtualEglLayer::doBeginFrame()
@@ -39,7 +41,7 @@ std::optional<OutputLayerBeginFrameInfo> VirtualEglLayer::doBeginFrame()
 
     const QSize nativeSize = m_output->modeSize();
     if (!m_swapchain || m_swapchain->size() != nativeSize) {
-        m_swapchain = EglSwapchain::create(m_backend->drmDevice()->allocator(), m_backend->openglContext(), nativeSize, DRM_FORMAT_XRGB8888, {DRM_FORMAT_MOD_INVALID});
+        m_swapchain = EglSwapchain::create(m_backend->drmDevice()->allocator(), m_backend->openglContext(), nativeSize, DRM_FORMAT_XRGB8888, m_backend->supportedFormats()[DRM_FORMAT_XRGB8888]);
         if (!m_swapchain) {
             return std::nullopt;
         }
@@ -55,7 +57,7 @@ std::optional<OutputLayerBeginFrameInfo> VirtualEglLayer::doBeginFrame()
 
     return OutputLayerBeginFrameInfo{
         .renderTarget = RenderTarget(m_current->framebuffer()),
-        .repaint = infiniteRegion(),
+        .repaint = s_bufferAgeEnabled ? m_damageJournal.accumulate(m_current->age(), infiniteRegion()) : infiniteRegion(),
     };
 }
 
@@ -64,6 +66,8 @@ bool VirtualEglLayer::doEndFrame(const QRegion &renderedRegion, const QRegion &d
     m_query->end();
     frame->addRenderTimeQuery(std::move(m_query));
     glFlush(); // flush pending rendering commands.
+    m_swapchain->release(m_current, FileDescriptor{});
+    m_damageJournal.add(damagedRegion);
     return true;
 }
 
@@ -77,6 +81,17 @@ QHash<uint32_t, QList<uint64_t>> VirtualEglLayer::supportedDrmFormats() const
     return m_backend->supportedFormats();
 }
 
+void VirtualEglLayer::releaseBuffers()
+{
+    m_current.reset();
+    m_swapchain.reset();
+}
+
+GLTexture *VirtualEglLayer::texture() const
+{
+    return m_current ? m_current->texture().get() : nullptr;
+}
+
 VirtualEglBackend::VirtualEglBackend(VirtualBackend *b)
     : m_backend(b)
 {
@@ -84,7 +99,10 @@ VirtualEglBackend::VirtualEglBackend(VirtualBackend *b)
 
 VirtualEglBackend::~VirtualEglBackend()
 {
-    m_outputs.clear();
+    const auto outputs = m_backend->outputs();
+    for (Output *output : outputs) {
+        static_cast<VirtualOutput *>(output)->setOutputLayer(nullptr);
+    }
     cleanup();
 }
 
@@ -145,7 +163,6 @@ void VirtualEglBackend::init()
     }
 
     connect(m_backend, &VirtualBackend::outputAdded, this, &VirtualEglBackend::addOutput);
-    connect(m_backend, &VirtualBackend::outputRemoved, this, &VirtualEglBackend::removeOutput);
 }
 
 bool VirtualEglBackend::initRenderingContext()
@@ -156,27 +173,12 @@ bool VirtualEglBackend::initRenderingContext()
 void VirtualEglBackend::addOutput(Output *output)
 {
     openglContext()->makeCurrent();
-    m_outputs[output] = std::make_unique<VirtualEglLayer>(output, this);
+    static_cast<VirtualOutput *>(output)->setOutputLayer(std::make_unique<VirtualEglLayer>(output, this));
 }
 
-void VirtualEglBackend::removeOutput(Output *output)
+QList<OutputLayer *> VirtualEglBackend::compatibleOutputLayers(Output *output)
 {
-    openglContext()->makeCurrent();
-    m_outputs.erase(output);
-}
-
-OutputLayer *VirtualEglBackend::primaryLayer(Output *output)
-{
-    return m_outputs[output].get();
-}
-
-std::pair<std::shared_ptr<KWin::GLTexture>, ColorDescription> VirtualEglBackend::textureForOutput(Output *output) const
-{
-    auto it = m_outputs.find(output);
-    if (it == m_outputs.end()) {
-        return {nullptr, ColorDescription::sRGB};
-    }
-    return std::make_pair(it->second->texture(), ColorDescription::sRGB);
+    return {static_cast<VirtualOutput *>(output)->outputLayer()};
 }
 
 } // namespace

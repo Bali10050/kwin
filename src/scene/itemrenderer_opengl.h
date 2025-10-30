@@ -22,16 +22,28 @@ class KWIN_EXPORT ItemRendererOpenGL : public ItemRenderer
 public:
     struct RenderNode
     {
-        std::variant<GLTexture *, OpenGLSurfaceContents> texture;
+        ShaderTraits traits;
+        QVarLengthArray<GLTexture *, 4> textures;
         RenderGeometry geometry;
         QMatrix4x4 transformMatrix;
         int firstVertex = 0;
         int vertexCount = 0;
         qreal opacity = 1;
         bool hasAlpha = false;
-        ColorDescription colorDescription;
+        std::shared_ptr<ColorDescription> colorDescription;
         RenderingIntent renderingIntent;
         std::shared_ptr<SyncReleasePoint> bufferReleasePoint;
+        QVector4D box;
+        QVector4D borderRadius;
+        int borderThickness = 0;
+        QColor borderColor;
+        bool paintHole = false;
+    };
+
+    struct RenderCorner
+    {
+        QRectF box;
+        BorderRadius radius;
     };
 
     struct RenderContext
@@ -39,6 +51,7 @@ public:
         QList<RenderNode> renderNodes;
         QStack<QMatrix4x4> transformStack;
         QStack<qreal> opacityStack;
+        QStack<RenderCorner> cornerStack;
         const QMatrix4x4 projectionMatrix;
         const QMatrix4x4 rootTransform;
         const QRegion clip;
@@ -52,14 +65,14 @@ public:
     void endFrame() override;
 
     void renderBackground(const RenderTarget &renderTarget, const RenderViewport &viewport, const QRegion &region) override;
-    void renderItem(const RenderTarget &renderTarget, const RenderViewport &viewport, Item *item, int mask, const QRegion &region, const WindowPaintData &data) override;
+    void renderItem(const RenderTarget &renderTarget, const RenderViewport &viewport, Item *item, int mask, const QRegion &region, const WindowPaintData &data, const std::function<bool(Item *)> &filter, const std::function<bool(Item *)> &holeFilter) override;
 
     std::unique_ptr<ImageItem> createImageItem(Item *parent = nullptr) override;
 
 private:
     QVector4D modulate(float opacity, float brightness) const;
     void setBlendEnabled(bool enabled);
-    void createRenderNode(Item *item, RenderContext *context);
+    void createRenderNode(Item *item, RenderContext *context, const std::function<bool(Item *)> &filter, const std::function<bool(Item *)> &holeFilter);
     void visualizeFractional(const RenderViewport &viewport, const QRegion &region, const RenderContext &renderContext);
 
     bool m_blendingEnabled = false;

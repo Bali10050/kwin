@@ -16,6 +16,7 @@
 #include "drm_gpu.h"
 #include "drm_logging.h"
 #include "drm_pointer.h"
+#include "utils/drm_format_helper.h"
 
 #include <drm_fourcc.h>
 #include <ranges>
@@ -70,6 +71,7 @@ DrmPlane::DrmPlane(DrmGpu *gpu, uint32_t planeId)
     , inFenceFd(this, QByteArrayLiteral("IN_FENCE_FD"))
     , sizeHints(this, QByteArrayLiteral("SIZE_HINTS"))
     , inFormatsForTearing(this, QByteArrayLiteral("IN_FORMATS_ASYNC"))
+    , zpos(this, QByteArrayLiteral("zpos"))
 {
 }
 
@@ -108,6 +110,7 @@ bool DrmPlane::updateProperties()
     inFenceFd.update(props);
     sizeHints.update(props);
     inFormatsForTearing.update(props);
+    zpos.update(props);
 
     if (!type.isValid() || !srcX.isValid() || !srcY.isValid() || !srcW.isValid() || !srcH.isValid()
         || !crtcX.isValid() || !crtcY.isValid() || !crtcW.isValid() || !crtcH.isValid() || !fbId.isValid()) {
@@ -135,6 +138,20 @@ bool DrmPlane::updateProperties()
             m_supportedFormats.insert(DRM_FORMAT_XRGB8888, modifiers);
         }
     }
+    m_lowBandwidthFormats.clear();
+    for (auto it = m_supportedFormats.begin(); it != m_supportedFormats.end(); it++) {
+        const auto info = FormatInfo::get(it.key());
+        if (info && info->bitsPerPixel <= 32) {
+            if (it.value().contains(DRM_FORMAT_MOD_INVALID)) {
+                // Mesa usually picks the modifier with lowest bandwidth requirements,
+                // so prefer implicit modifiers for low bandwidth if supported
+                m_lowBandwidthFormats.insert(it.key(), {DRM_FORMAT_MOD_INVALID});
+            } else {
+                m_lowBandwidthFormats.insert(it.key(), it.value());
+            }
+        }
+    }
+
     m_sizeHints.clear();
     if (sizeHints.isValid() && sizeHints.immutableBlob()) {
         // TODO switch to drm_plane_size_hint once we require libdrm 2.4.122
@@ -182,6 +199,11 @@ bool DrmPlane::isCrtcSupported(int pipeIndex) const
     return (m_possibleCrtcs & (1 << pipeIndex));
 }
 
+QHash<uint32_t, QList<uint64_t>> DrmPlane::lowBandwidthFormats() const
+{
+    return m_lowBandwidthFormats;
+}
+
 QHash<uint32_t, QList<uint64_t>> DrmPlane::formats() const
 {
     return m_supportedFormats;
@@ -204,7 +226,7 @@ void DrmPlane::setCurrentBuffer(const std::shared_ptr<DrmFramebuffer> &b)
     }
 
     m_current = b;
-    if (b) {
+    if (b && !m_lastBuffers.contains(b->data())) {
         m_lastBuffers.prepend(b->data());
         m_lastBuffers.resize(4);
     }

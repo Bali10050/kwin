@@ -40,9 +40,9 @@ void ColorManagerV1::wp_color_manager_v1_bind_resource(Resource *resource)
     send_supported_primaries_named(resource->handle, primaries::primaries_adobe_rgb);
 
     send_supported_tf_named(resource->handle, transfer_function::transfer_function_gamma22);
-    send_supported_tf_named(resource->handle, transfer_function::transfer_function_srgb);
     send_supported_tf_named(resource->handle, transfer_function::transfer_function_st2084_pq);
     send_supported_tf_named(resource->handle, transfer_function::transfer_function_ext_linear);
+    send_supported_tf_named(resource->handle, transfer_function::transfer_function_bt1886);
 
     send_supported_intent(resource->handle, render_intent::render_intent_perceptual);
     send_supported_intent(resource->handle, render_intent::render_intent_relative);
@@ -93,7 +93,7 @@ void ColorManagerV1::wp_color_manager_v1_create_parametric_creator(Resource *res
 
 void ColorManagerV1::wp_color_manager_v1_create_windows_scrgb(Resource *resource, uint32_t image_description)
 {
-    const auto scrgb = ColorDescription{
+    const auto scrgb = std::make_shared<ColorDescription>(ColorDescription{
         Colorimetry::BT709,
         TransferFunction(TransferFunction::linear, 0, 80),
         203,
@@ -102,7 +102,7 @@ void ColorManagerV1::wp_color_manager_v1_create_windows_scrgb(Resource *resource
         std::nullopt,
         Colorimetry::BT2020,
         Colorimetry::BT709,
-    };
+    });
     ImageDescriptionV1::createReady(resource->client(), image_description, resource->version(), scrgb);
 }
 
@@ -120,7 +120,7 @@ ColorFeedbackSurfaceV1::~ColorFeedbackSurfaceV1()
     }
 }
 
-void ColorFeedbackSurfaceV1::setPreferredColorDescription(const ColorDescription &descr)
+void ColorFeedbackSurfaceV1::setPreferredColorDescription(const std::shared_ptr<ColorDescription> &descr)
 {
     if (m_preferred != descr) {
         m_preferred = descr;
@@ -180,9 +180,8 @@ static std::optional<RenderingIntent> waylandToKwinIntent(uint32_t intent)
     case QtWaylandServer::wp_color_manager_v1::render_intent::render_intent_perceptual:
         return RenderingIntent::Perceptual;
     case QtWaylandServer::wp_color_manager_v1::render_intent::render_intent_relative:
-        return RenderingIntent::RelativeColorimetric;
     case QtWaylandServer::wp_color_manager_v1::render_intent::render_intent_absolute:
-        return RenderingIntent::AbsoluteColorimetric;
+        return RenderingIntent::RelativeColorimetric;
     case QtWaylandServer::wp_color_manager_v1::render_intent::render_intent_relative_bpc:
         return RenderingIntent::RelativeColorimetricWithBPC;
     case QtWaylandServer::wp_color_manager_v1::render_intent::render_intent_saturation:
@@ -194,6 +193,7 @@ static std::optional<RenderingIntent> waylandToKwinIntent(uint32_t intent)
 void ColorSurfaceV1::wp_color_management_surface_v1_set_image_description(Resource *resource, struct ::wl_resource *image_description, uint32_t render_intent)
 {
     if (!m_surface) {
+        wl_resource_post_error(resource->handle, WP_COLOR_MANAGEMENT_SURFACE_V1_ERROR_INERT, "the associated surface was already destroyed");
         return;
     }
     const std::optional<RenderingIntent> intent = waylandToKwinIntent(render_intent);
@@ -215,6 +215,7 @@ void ColorSurfaceV1::wp_color_management_surface_v1_set_image_description(Resour
 void ColorSurfaceV1::wp_color_management_surface_v1_unset_image_description(Resource *resource)
 {
     if (!m_surface) {
+        wl_resource_post_error(resource->handle, WP_COLOR_MANAGEMENT_SURFACE_V1_ERROR_INERT, "the associated surface was already destroyed");
         return;
     }
     const auto priv = SurfaceInterfacePrivate::get(m_surface);
@@ -265,7 +266,16 @@ void ColorParametricCreatorV1::wp_image_description_creator_params_v1_create(Res
         m_minMasteringLuminance = func.minLuminance;
     }
     if (Colorimetry::isValid(m_colorimetry->red().toxy(), m_colorimetry->green().toxy(), m_colorimetry->blue().toxy(), m_colorimetry->white().toxy())) {
-        ImageDescriptionV1::createReady(resource->client(), image_description, resource->version(), ColorDescription(*m_colorimetry, func, referenceLuminance, m_minMasteringLuminance.value_or(func.minLuminance), maxFrameAverageLuminance, maxHdrLuminance.value_or(func.maxLuminance), m_masteringColorimetry, Colorimetry::BT709));
+        ImageDescriptionV1::createReady(resource->client(), image_description, resource->version(), std::make_shared<ColorDescription>(ColorDescription{
+                                                                                                        *m_colorimetry,
+                                                                                                        func,
+                                                                                                        referenceLuminance,
+                                                                                                        m_minMasteringLuminance.value_or(func.minLuminance),
+                                                                                                        maxFrameAverageLuminance,
+                                                                                                        maxHdrLuminance.value_or(func.maxLuminance),
+                                                                                                        m_masteringColorimetry.value_or(*m_colorimetry),
+                                                                                                        Colorimetry::BT709,
+                                                                                                    }));
     } else {
         ImageDescriptionV1::createFailed(resource->client(), image_description, resource->version(), WP_IMAGE_DESCRIPTION_V1_CAUSE_UNSUPPORTED, QStringLiteral("The provided image description failed to verify as usable"));
     }
@@ -279,7 +289,6 @@ void ColorParametricCreatorV1::wp_image_description_creator_params_v1_set_tf_nam
         return;
     }
     switch (tf) {
-    case WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_SRGB:
     case WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_GAMMA22:
         m_transferFunctionType = TransferFunction::gamma22;
         return;
@@ -289,6 +298,12 @@ void ColorParametricCreatorV1::wp_image_description_creator_params_v1_set_tf_nam
     case WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_EXT_LINEAR:
         m_transferFunctionType = TransferFunction::linear;
         return;
+    case WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_BT1886:
+        m_transferFunctionType = TransferFunction::BT1886;
+        return;
+        // intentionally not supported - it's confusing and
+        // deprecated in version 2 of the protocol
+    case WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_SRGB:
     default:
         // TODO add more transfer functions
         wl_resource_post_error(resource->handle, error::error_invalid_tf, "unsupported named transfer function");
@@ -431,7 +446,7 @@ void ColorParametricCreatorV1::wp_image_description_creator_params_v1_set_max_fa
 
 uint64_t ImageDescriptionV1::s_idCounter = 1;
 
-ImageDescriptionV1 *ImageDescriptionV1::createReady(wl_client *client, uint32_t id, uint32_t version, const ColorDescription &colorDescription)
+ImageDescriptionV1 *ImageDescriptionV1::createReady(wl_client *client, uint32_t id, uint32_t version, const std::shared_ptr<ColorDescription> &colorDescription)
 {
     auto description = new ImageDescriptionV1(client, id, version, colorDescription);
     description->send_ready(s_idCounter++);
@@ -445,7 +460,7 @@ ImageDescriptionV1 *ImageDescriptionV1::createFailed(wl_client *client, uint32_t
     return description;
 }
 
-ImageDescriptionV1::ImageDescriptionV1(wl_client *client, uint32_t id, uint32_t version, const std::optional<ColorDescription> &color)
+ImageDescriptionV1::ImageDescriptionV1(wl_client *client, uint32_t id, uint32_t version, const std::optional<std::shared_ptr<ColorDescription>> &color)
     : QtWaylandServer::wp_image_description_v1(client, id, version)
     , m_description(color)
 {
@@ -464,14 +479,16 @@ void ImageDescriptionV1::wp_image_description_v1_destroy(Resource *resource)
 static uint32_t kwinTFtoProtoTF(TransferFunction tf)
 {
     switch (tf.type) {
-    case TransferFunction::sRGB:
-        return WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_SRGB;
     case TransferFunction::linear:
         return WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_EXT_LINEAR;
     case TransferFunction::PerceptualQuantizer:
         return WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_ST2084_PQ;
+        // not "correct", but the piece-wise TF shouldn't be used anyways
+    case TransferFunction::sRGB:
     case TransferFunction::gamma22:
         return WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_GAMMA22;
+    case TransferFunction::BT1886:
+        return WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_BT1886;
     }
     Q_UNREACHABLE();
 }
@@ -529,47 +546,46 @@ void ImageDescriptionV1::wp_image_description_v1_get_information(Resource *qtRes
         wl_resource_post_error(qtResource->handle, error_no_information, "Can't request information from a failed image description");
         return;
     }
+    const auto &color = *m_description;
     auto resource = wl_resource_create(qtResource->client(), &wp_image_description_info_v1_interface, qtResource->version(), information);
     const auto round = [](float f) {
         return std::clamp(std::round(f / s_primaryUnit), 0.0, 1.0 / s_primaryUnit);
     };
-    const xyY containerRed = m_description->containerColorimetry().red().toxyY();
-    const xyY containerGreen = m_description->containerColorimetry().green().toxyY();
-    const xyY containerBlue = m_description->containerColorimetry().blue().toxyY();
-    const xyY containerWhite = m_description->containerColorimetry().white().toxyY();
+    const xyY containerRed = color->containerColorimetry().red().toxyY();
+    const xyY containerGreen = color->containerColorimetry().green().toxyY();
+    const xyY containerBlue = color->containerColorimetry().blue().toxyY();
+    const xyY containerWhite = color->containerColorimetry().white().toxyY();
     wp_image_description_info_v1_send_primaries(resource,
                                                 round(containerRed.x), round(containerRed.y),
                                                 round(containerGreen.x), round(containerGreen.y),
                                                 round(containerBlue.x), round(containerBlue.y),
                                                 round(containerWhite.x), round(containerWhite.y));
-    if (auto name = kwinPrimariesToProtoPrimaires(m_description->containerColorimetry())) {
+    if (auto name = kwinPrimariesToProtoPrimaires(color->containerColorimetry())) {
         wp_image_description_info_v1_send_primaries_named(resource, *name);
     }
-    if (auto m = m_description->masteringColorimetry()) {
-        const xyY masterRed = m->red().toxyY();
-        const xyY masterGreen = m->green().toxyY();
-        const xyY masterBlue = m->blue().toxyY();
-        const xyY masterWhite = m->white().toxyY();
-        wp_image_description_info_v1_send_target_primaries(resource,
-                                                           round(masterRed.x), round(masterRed.y),
-                                                           round(masterGreen.x), round(masterGreen.y),
-                                                           round(masterBlue.x), round(masterBlue.y),
-                                                           round(masterWhite.x), round(masterWhite.y));
-    }
-    if (auto maxfall = m_description->maxAverageLuminance()) {
+    const xyY masterRed = color->masteringColorimetry().red().toxyY();
+    const xyY masterGreen = color->masteringColorimetry().green().toxyY();
+    const xyY masterBlue = color->masteringColorimetry().blue().toxyY();
+    const xyY masterWhite = color->masteringColorimetry().white().toxyY();
+    wp_image_description_info_v1_send_target_primaries(resource,
+                                                       round(masterRed.x), round(masterRed.y),
+                                                       round(masterGreen.x), round(masterGreen.y),
+                                                       round(masterBlue.x), round(masterBlue.y),
+                                                       round(masterWhite.x), round(masterWhite.y));
+    if (auto maxfall = color->maxAverageLuminance()) {
         wp_image_description_info_v1_send_target_max_fall(resource, std::round(*maxfall));
     }
-    if (auto maxcll = m_description->maxHdrLuminance()) {
+    if (auto maxcll = color->maxHdrLuminance()) {
         wp_image_description_info_v1_send_target_max_cll(resource, std::round(*maxcll));
     }
-    wp_image_description_info_v1_send_luminances(resource, std::round(m_description->transferFunction().minLuminance / s_minLuminanceUnit), std::round(m_description->transferFunction().maxLuminance), std::round(m_description->referenceLuminance()));
-    wp_image_description_info_v1_send_target_luminance(resource, std::round(m_description->minLuminance() / s_minLuminanceUnit), std::round(m_description->maxHdrLuminance().value_or(800)));
-    wp_image_description_info_v1_send_tf_named(resource, kwinTFtoProtoTF(m_description->transferFunction()));
+    wp_image_description_info_v1_send_luminances(resource, std::round(color->transferFunction().minLuminance / s_minLuminanceUnit), std::round(color->transferFunction().maxLuminance), std::round(color->referenceLuminance()));
+    wp_image_description_info_v1_send_target_luminance(resource, std::round(color->minLuminance() / s_minLuminanceUnit), std::round(color->maxHdrLuminance().value_or(800)));
+    wp_image_description_info_v1_send_tf_named(resource, kwinTFtoProtoTF(color->transferFunction()));
     wp_image_description_info_v1_send_done(resource);
     wl_resource_destroy(resource);
 }
 
-const std::optional<ColorDescription> &ImageDescriptionV1::description() const
+const std::optional<std::shared_ptr<ColorDescription>> &ImageDescriptionV1::description() const
 {
     return m_description;
 }
@@ -587,7 +603,7 @@ ColorManagementOutputV1::ColorManagementOutputV1(wl_client *client, uint32_t id,
     : QtWaylandServer::wp_color_management_output_v1(client, id, version)
     , m_output(output)
 {
-    if (m_output->isRemoved()) {
+    if (!m_output || m_output->isRemoved()) {
         return;
     }
 

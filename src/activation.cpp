@@ -21,6 +21,7 @@
 #if KWIN_BUILD_ACTIVITIES
 #include "activities.h"
 #endif
+#include "input.h"
 #include "rules.h"
 #include "useractions.h"
 #include "virtualdesktops.h"
@@ -82,7 +83,7 @@ namespace KWin
    the timestamp of the action that originally caused mapping of the new window
    (e.g. when the application was started). If the first time is newer than
    the second one, the window will not be activated, as that indicates
-   futher user actions took place after the action leading to this new
+   further user actions took place after the action leading to this new
    mapped window. This check is done by Workspace::allowWindowActivation().
     There are several ways how to get the timestamp of action that caused
    the new mapped window (done in X11Window::readUserTimeMapTimestamp()) :
@@ -239,26 +240,18 @@ void Workspace::setActiveWindow(Window *window)
         should_get_focus.clear();
     }
 
-    if (m_activeWindow != nullptr) {
-        // note that this may call setActiveWindow( NULL ), therefore the recursion counter
-        m_activeWindow->setActive(false);
-    }
+    Window *previousActiveWindow = m_activeWindow;
     m_activeWindow = window;
-    Q_ASSERT(window == nullptr || window->isActive());
+
+    if (previousActiveWindow) {
+        previousActiveWindow->setActive(false);
+    }
 
     if (m_activeWindow) {
         m_lastActiveWindow = m_activeWindow;
         m_focusChain->update(m_activeWindow, FocusChain::MakeFirst);
         m_activeWindow->demandAttention(false);
-
-        // activating a client can cause a non active fullscreen window to loose the ActiveLayer status on > 1 screens
-        if (outputs().count() > 1) {
-            for (auto it = m_windows.begin(); it != m_windows.end(); ++it) {
-                if (*it != m_activeWindow && (*it)->layer() == ActiveLayer && (*it)->output() == m_activeWindow->output()) {
-                    (*it)->updateLayer();
-                }
-            }
-        }
+        m_activeWindow->setActive(true);
     }
 
     if (window) {
@@ -266,8 +259,6 @@ void Workspace::setActiveWindow(Window *window)
     } else {
         disableGlobalShortcutsForClient(false);
     }
-
-    updateStackingOrder(); // e.g. fullscreens have different layer when active/not-active
 
 #if KWIN_BUILD_X11
     if (rootInfo()) {
@@ -404,14 +395,6 @@ bool Workspace::takeActivity(Window *window, ActivityFlags flags)
     if (!flags.testFlag(ActivityFocusForce) && window->isSplash()) {
         flags &= ~ActivityFocus; // toplevel menus don't take focus if not forced
     }
-    if (window->isShade()) {
-        if (window->wantsInput() && (flags & ActivityFocus)) {
-            // window cannot accept focus, but at least the window should be active (window menu, et. al. )
-            window->setActive(true);
-            focusToNull();
-        }
-        flags &= ~ActivityFocus;
-    }
     if (!window->isShown()) { // shouldn't happen, call activateWindow() if needed
         qCWarning(KWIN_CORE) << "takeActivity: not shown";
         return false;
@@ -444,7 +427,7 @@ Window *Workspace::windowUnderMouse(Output *output) const
 
         // rule out windows which are not really visible.
         // the screen test is rather superfluous for xrandr & twinview since the geometry would differ -> TODO: might be dropped
-        if (!(window->isShown() && window->isOnCurrentDesktop() && window->isOnCurrentActivity() && window->isOnOutput(output) && !window->isShade())) {
+        if (!(window->isShown() && window->isOnCurrentDesktop() && window->isOnCurrentActivity() && window->isOnOutput(output))) {
             continue;
         }
 
@@ -569,15 +552,15 @@ void Workspace::setShouldGetFocus(Window *window)
 // to the same application
 bool Workspace::allowFullClientRaising(const KWin::Window *window, uint32_t time)
 {
-    int level = window->rules()->checkFSP(options->focusStealingPreventionLevel());
-    if (sessionManager()->state() == SessionState::Saving && level <= 2) { // <= normal
+    FocusStealingPreventionLevel level = window->rules()->checkFSP(options->focusStealingPreventionLevel());
+    if (sessionManager()->state() == SessionState::Saving && level <= FocusStealingPreventionLevel::Medium) {
         return true;
     }
     Window *ac = mostRecentlyActivatedWindow();
-    if (level == 0) { // none
+    if (level == FocusStealingPreventionLevel::None) {
         return true;
     }
-    if (level == 4) { // extreme
+    if (level == FocusStealingPreventionLevel::Extreme) {
         return false;
     }
     if (ac == nullptr || ac->isDesktop()) {
@@ -589,7 +572,7 @@ bool Workspace::allowFullClientRaising(const KWin::Window *window, uint32_t time
         qCDebug(KWIN_CORE) << "Raising: Belongs to active application";
         return true;
     }
-    if (level == 3) { // high
+    if (level == FocusStealingPreventionLevel::High) {
         return false;
     }
 #if KWIN_BUILD_X11
@@ -636,6 +619,38 @@ void Workspace::windowAttentionChanged(Window *window, bool set)
     } else {
         attention_chain.removeAll(window);
     }
+}
+
+void Workspace::setActivationToken(const QString &token, uint32_t serial, const QString &appId)
+{
+    m_activationToken = token;
+    m_activationTokenSerial = serial;
+    m_activationTokenAppId = appId;
+}
+
+bool Workspace::mayActivate(Window *window, const QString &token) const
+{
+    if (!m_activeWindow) {
+        return true;
+    }
+    const FocusStealingPreventionLevel focusStealingPreventionLevel = window->rules()->checkFSP(options->focusStealingPreventionLevel());
+    if (focusStealingPreventionLevel == FocusStealingPreventionLevel::None) {
+        return true;
+    }
+    if (!m_activationToken.isEmpty() && token == m_activationToken && input()->lastInteractionSerial() <= m_activationTokenSerial) {
+        return true;
+    } else if (focusStealingPreventionLevel == FocusStealingPreventionLevel::Extreme) {
+        // "Extreme" only accepts proper activation tokens
+        return false;
+    }
+    // with focus stealing prevention below "Extreme"
+    // also allow activation if the app id matches with the last activation token
+    if (!m_activationToken.isEmpty()
+        && input()->lastInteractionSerial() <= m_activationTokenSerial
+        && m_activationTokenAppId == window->desktopFileName()) {
+        return true;
+    }
+    return false;
 }
 
 } // namespace

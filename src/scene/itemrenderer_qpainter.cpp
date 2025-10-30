@@ -59,7 +59,7 @@ void ItemRendererQPainter::renderBackground(const RenderTarget &renderTarget, co
     m_painter->setCompositionMode(QPainter::CompositionMode_SourceOver);
 }
 
-void ItemRendererQPainter::renderItem(const RenderTarget &renderTarget, const RenderViewport &viewport, Item *item, int mask, const QRegion &_region, const WindowPaintData &data)
+void ItemRendererQPainter::renderItem(const RenderTarget &renderTarget, const RenderViewport &viewport, Item *item, int mask, const QRegion &_region, const WindowPaintData &data, const std::function<bool(Item *)> &filter, const std::function<bool(Item *)> &holeFilter)
 {
     QRegion region = _region;
 
@@ -82,13 +82,16 @@ void ItemRendererQPainter::renderItem(const RenderTarget &renderTarget, const Re
         m_painter->scale(data.xScale(), data.yScale());
     }
 
-    renderItem(m_painter.get(), item);
+    renderItem(m_painter.get(), item, filter);
 
     m_painter->restore();
 }
 
-void ItemRendererQPainter::renderItem(QPainter *painter, Item *item) const
+void ItemRendererQPainter::renderItem(QPainter *painter, Item *item, const std::function<bool(Item *)> &filter) const
 {
+    if (filter && filter(item)) {
+        return;
+    }
     const QList<Item *> sortedChildItems = item->sortedChildItems();
 
     painter->save();
@@ -100,7 +103,7 @@ void ItemRendererQPainter::renderItem(QPainter *painter, Item *item) const
             break;
         }
         if (childItem->explicitVisible()) {
-            renderItem(painter, childItem);
+            renderItem(painter, childItem, filter);
         }
     }
 
@@ -118,7 +121,7 @@ void ItemRendererQPainter::renderItem(QPainter *painter, Item *item) const
             continue;
         }
         if (childItem->explicitVisible()) {
-            renderItem(painter, childItem);
+            renderItem(painter, childItem, filter);
         }
     }
 
@@ -127,13 +130,10 @@ void ItemRendererQPainter::renderItem(QPainter *painter, Item *item) const
 
 void ItemRendererQPainter::renderSurfaceItem(QPainter *painter, SurfaceItem *surfaceItem) const
 {
-    const SurfacePixmap *surfaceTexture = surfaceItem->pixmap();
+    const auto surfaceTexture = static_cast<QPainterSurfaceTexture *>(surfaceItem->texture());
     if (!surfaceTexture || !surfaceTexture->isValid()) {
         return;
     }
-
-    QPainterSurfaceTexture *platformSurfaceTexture =
-        static_cast<QPainterSurfaceTexture *>(surfaceTexture->texture());
 
     const OutputTransform surfaceToBufferTransform = surfaceItem->bufferTransform();
     const QSizeF transformedSize = surfaceToBufferTransform.map(surfaceItem->destinationSize());
@@ -186,7 +186,7 @@ void ItemRendererQPainter::renderSurfaceItem(QPainter *painter, SurfaceItem *sur
                             target.width() * xSourceBoxScale,
                             target.height() * ySourceBoxScale);
 
-        painter->drawImage(target, platformSurfaceTexture->image(), source);
+        painter->drawImage(target, surfaceTexture->image(), source);
     }
 
     painter->restore();

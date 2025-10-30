@@ -134,7 +134,6 @@ SLOTWRAPPER(slotWindowMaximize)
 SLOTWRAPPER(slotWindowMaximizeVertical)
 SLOTWRAPPER(slotWindowMaximizeHorizontal)
 SLOTWRAPPER(slotWindowMinimize)
-SLOTWRAPPER(slotWindowShade)
 SLOTWRAPPER(slotWindowRaise)
 SLOTWRAPPER(slotWindowLower)
 SLOTWRAPPER(slotWindowRaiseOrLower)
@@ -319,6 +318,16 @@ void WorkspaceWrapper::raiseWindow(KWin::Window *window)
     }
 }
 
+void WorkspaceWrapper::constrain(KWin::Window *below, KWin::Window *above)
+{
+    KWin::Workspace::self()->constrain(below, above);
+}
+
+void WorkspaceWrapper::unconstrain(KWin::Window *below, KWin::Window *above)
+{
+    KWin::Workspace::self()->unconstrain(below, above);
+}
+
 #if KWIN_BUILD_X11
 Window *WorkspaceWrapper::getClient(qulonglong windowId)
 {
@@ -378,6 +387,11 @@ int WorkspaceWrapper::desktopGridWidth() const
 int WorkspaceWrapper::desktopGridHeight() const
 {
     return desktopGridSize().height();
+}
+
+void WorkspaceWrapper::setDesktopGridHeight(int height)
+{
+    VirtualDesktopManager::self()->setRows(height);
 }
 
 int WorkspaceWrapper::workspaceHeight() const

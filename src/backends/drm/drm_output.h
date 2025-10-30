@@ -41,18 +41,18 @@ public:
     DrmConnector *connector() const;
     DrmPipeline *pipeline() const;
 
-    bool present(const std::shared_ptr<OutputFrame> &frame) override;
+    bool testPresentation(const std::shared_ptr<OutputFrame> &frame) override;
+    bool present(const QList<OutputLayer *> &layersToUpdate, const std::shared_ptr<OutputFrame> &frame) override;
     void repairPresentation() override;
-    DrmOutputLayer *primaryLayer() const override;
-    DrmOutputLayer *cursorLayer() const override;
+    bool overlayLayersLikelyBroken() const override;
 
     bool queueChanges(const std::shared_ptr<OutputChangeSet> &properties);
     void applyQueuedChanges(const std::shared_ptr<OutputChangeSet> &properties);
     void revertQueuedChanges();
     void updateDpmsMode(DpmsMode dpmsMode);
 
-    bool shouldDisableCursorPlane() const;
-    bool updateCursorLayer(std::optional<std::chrono::nanoseconds> allowedVrrDelay) override;
+    bool shouldDisableNonPrimaryPlanes() const;
+    bool presentAsync(OutputLayer *layer, std::optional<std::chrono::nanoseconds> allowedVrrDelay) override;
     void setAutoRotateAvailable(bool isAvailable) override;
 
     DrmLease *lease() const;
@@ -64,14 +64,6 @@ public:
     void updateConnectorProperties();
 
     /**
-     * @returns the color description / encoding that the buffers passed to the CRTC need to have, without a color pipeline to change it
-     */
-    const ColorDescription &scanoutColorDescription() const;
-    /**
-     * @returns the color description that compositing and blending need to happen in
-     */
-    const ColorDescription &blendingColorDescription() const;
-    /**
      * @returns whether or not the renderer should apply channel factors
      */
     bool needsShadowBuffer() const;
@@ -81,14 +73,13 @@ public:
 private:
     bool setDrmDpmsMode(DpmsMode mode);
     void setDpmsMode(DpmsMode mode) override;
-    void tryKmsColorOffloading();
-    ColorDescription createColorDescription(const State &next) const;
+    void tryKmsColorOffloading(State &next);
+    std::shared_ptr<ColorDescription> createColorDescription(const State &next) const;
     Capabilities computeCapabilities() const;
     void updateInformation();
     void unsetBrightnessDevice() override;
     void updateBrightness(double newBrightness, double newArtificialHdrHeadroom);
-    void setScanoutColorDescription(const ColorDescription &description);
-    void setBlendingColorDescription(const ColorDescription &description);
+    void maybeScheduleRepaints(const State &next);
     std::optional<uint32_t> decideAutomaticBpcLimit() const;
 
     QList<std::shared_ptr<OutputMode>> getModes() const;
@@ -103,8 +94,6 @@ private:
 
     QVector3D m_sRgbChannelFactors = {1, 1, 1};
     bool m_needsShadowBuffer = false;
-    ColorDescription m_scanoutColorDescription = ColorDescription::sRGB;
-    ColorDescription m_blendingColorDescription = ColorDescription::sRGB;
     PresentationMode m_desiredPresentationMode = PresentationMode::VSync;
     bool m_autoRotateAvailable = false;
 };

@@ -63,6 +63,7 @@
 #include "wayland/plasmawindowmanagement.h"
 #include "wayland/pointerconstraints_v1.h"
 #include "wayland/pointergestures_v1.h"
+#include "wayland/pointerwarp_v1.h"
 #include "wayland/presentationtime.h"
 #include "wayland/primaryselectiondevicemanager_v1.h"
 #include "wayland/relativepointer_v1.h"
@@ -91,6 +92,7 @@
 #include "xdgactivationv1.h"
 #include "xdgshellintegration.h"
 #include "xdgshellwindow.h"
+#include "xxpipv1integration.h"
 #if KWIN_BUILD_X11
 #include "wayland/xwaylandkeyboardgrab_v1.h"
 #include "wayland/xwaylandshell_v1.h"
@@ -379,7 +381,7 @@ bool WaylandServer::init()
     m_keyboardShortcutsInhibitManager = new KeyboardShortcutsInhibitManagerV1Interface(m_display, m_display);
 
     if (qEnvironmentVariableIntValue("KWIN_WAYLAND_SUPPORT_XX_SESSION_MANAGER") == 1) {
-        auto storage = new XdgSessionConfigStorageV1(KSharedConfig::openStateConfig(QStringLiteral("kwinsessionrc")), this);
+        auto storage = new XdgSessionStorageV1(KSharedConfig::openStateConfig(QStringLiteral("kwinsessionrc")), this);
         new XdgSessionManagerV1Interface(m_display, storage, m_display);
     }
 
@@ -523,13 +525,12 @@ bool WaylandServer::init()
 
     m_externalBrightness = new ExternalBrightnessV1(m_display, m_display);
     m_alphaModifierManager = new AlphaModifierManagerV1(m_display, m_display);
-#if HAVE_WL_FIXES
     new FixesInterface(m_display, m_display);
-#endif
     m_fifoManager = new FifoManagerV1(m_display, m_display);
     m_singlePixelBuffer = new SinglePixelBufferManagerV1(m_display, m_display);
     m_toplevelTag = new XdgToplevelTagManagerV1(m_display, m_display);
     m_colorRepresentation = new ColorRepresentationManagerV1(m_display, m_display);
+    m_pointerWarp = new PointerWarpV1(m_display, m_display);
     return true;
 }
 
@@ -580,6 +581,12 @@ void WaylandServer::initWorkspace()
     auto layerShellV1Integration = new LayerShellV1Integration(this);
     connect(layerShellV1Integration, &LayerShellV1Integration::windowCreated,
             this, &WaylandServer::registerWindow);
+
+    if (qEnvironmentVariableIntValue("KWIN_WAYLAND_SUPPORT_XX_PIP_V1") == 1) {
+        auto pipV1Integration = new XXPipV1Integration(this);
+        connect(pipV1Integration, &XXPipV1Integration::windowCreated,
+                this, &WaylandServer::registerWindow);
+    }
 
     new KeyStateInterface(m_display, m_display);
 
@@ -838,6 +845,11 @@ LinuxDrmSyncObjV1Interface *WaylandServer::linuxSyncObj() const
 ExternalBrightnessV1 *WaylandServer::externalBrightness() const
 {
     return m_externalBrightness;
+}
+
+PointerWarpV1 *WaylandServer::pointerWarp() const
+{
+    return m_pointerWarp;
 }
 
 void WaylandServer::setRenderBackend(RenderBackend *backend)

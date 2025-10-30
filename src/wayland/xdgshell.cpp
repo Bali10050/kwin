@@ -10,6 +10,7 @@
 #include "display.h"
 #include "output.h"
 #include "seat.h"
+#include "utils/gravity.h"
 #include "utils/resource.h"
 
 #include <QTimer>
@@ -84,11 +85,6 @@ void XdgShellInterfacePrivate::xdg_wm_base_create_positioner(Resource *resource,
 void XdgShellInterfacePrivate::xdg_wm_base_get_xdg_surface(Resource *resource, uint32_t id, ::wl_resource *surfaceResource)
 {
     SurfaceInterface *surface = SurfaceInterface::get(surfaceResource);
-
-    if (surface->buffer()) {
-        wl_resource_post_error(resource->handle, XDG_SURFACE_ERROR_UNCONFIGURED_BUFFER, "xdg_surface must not have a buffer at creation");
-        return;
-    }
 
     wl_resource *xdgSurfaceResource = wl_resource_create(resource->client(), &xdg_surface_interface, resource->version(), id);
 
@@ -186,7 +182,7 @@ void XdgSurfaceInterfacePrivate::xdg_surface_destroy_resource(Resource *resource
 
 void XdgSurfaceInterfacePrivate::xdg_surface_destroy(Resource *resource)
 {
-    if (toplevel || popup) {
+    if (!toplevel.isNull() || !popup.isNull() || !pip.isNull()) {
         qWarning() << "Tried to destroy xdg_surface before its role object";
     }
     wl_resource_destroy(resource->handle);

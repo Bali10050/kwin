@@ -33,21 +33,16 @@ GlobalShortcut::GlobalShortcut(Shortcut &&sc, QAction *action)
     , m_action(action)
 {
     if (auto swipeGesture = std::get_if<RealtimeFeedbackSwipeShortcut>(&sc)) {
-        m_swipeGesture = std::make_unique<SwipeGesture>();
+        m_swipeGesture = std::make_unique<SwipeGesture>(swipeGesture->fingerCount);
         m_swipeGesture->setDirection(swipeGesture->direction);
-        m_swipeGesture->setMinimumDelta(QPointF(200, 200));
-        m_swipeGesture->setMaximumFingerCount(swipeGesture->fingerCount);
-        m_swipeGesture->setMinimumFingerCount(swipeGesture->fingerCount);
         QObject::connect(m_swipeGesture.get(), &SwipeGesture::triggered, m_action, &QAction::trigger, Qt::QueuedConnection);
         QObject::connect(m_swipeGesture.get(), &SwipeGesture::cancelled, m_action, &QAction::trigger, Qt::QueuedConnection);
         if (swipeGesture->progressCallback) {
             QObject::connect(m_swipeGesture.get(), &SwipeGesture::progress, swipeGesture->progressCallback);
         }
     } else if (auto pinchGesture = std::get_if<RealtimeFeedbackPinchShortcut>(&sc)) {
-        m_pinchGesture = std::make_unique<PinchGesture>();
+        m_pinchGesture = std::make_unique<PinchGesture>(pinchGesture->fingerCount);
         m_pinchGesture->setDirection(pinchGesture->direction);
-        m_pinchGesture->setMaximumFingerCount(pinchGesture->fingerCount);
-        m_pinchGesture->setMinimumFingerCount(pinchGesture->fingerCount);
         QObject::connect(m_pinchGesture.get(), &PinchGesture::triggered, m_action, &QAction::trigger, Qt::QueuedConnection);
         QObject::connect(m_pinchGesture.get(), &PinchGesture::cancelled, m_action, &QAction::trigger, Qt::QueuedConnection);
         if (pinchGesture->scaleCallback) {
@@ -105,6 +100,7 @@ void GlobalShortcutsManager::init()
         qCDebug(KWIN_CORE) << "Init of kglobalaccel failed";
         m_kglobalAccel.reset();
     } else {
+        m_kglobalAccelInterface = m_kglobalAccel->interface();
         qCDebug(KWIN_CORE) << "KGlobalAcceld inited";
     }
 #endif
@@ -189,20 +185,21 @@ void GlobalShortcutsManager::forceRegisterTouchscreenSwipe(SwipeDirection direct
     m_shortcuts.push_back(std::move(shortcut));
 }
 
-bool GlobalShortcutsManager::processKey(Qt::KeyboardModifiers mods, int keyQt)
+bool GlobalShortcutsManager::processKey(Qt::KeyboardModifiers mods, int keyQt, KeyboardKeyState state)
 {
 #if KWIN_BUILD_GLOBALSHORTCUTS
     if (m_kglobalAccelInterface) {
-        auto check = [this](Qt::KeyboardModifiers mods, int keyQt) {
+        auto check = [this](Qt::KeyboardModifiers mods, int keyQt, KeyboardKeyState keyState) {
             bool retVal = false;
             QMetaObject::invokeMethod(m_kglobalAccelInterface,
                                       "checkKeyPressed",
                                       Qt::DirectConnection,
                                       Q_RETURN_ARG(bool, retVal),
-                                      Q_ARG(int, int(mods) | keyQt));
+                                      Q_ARG(int, int(mods) | keyQt),
+                                      Q_ARG(KeyboardKeyState, keyState));
             return retVal;
         };
-        if (check(mods, keyQt)) {
+        if (check(mods, keyQt, state)) {
             return true;
         } else if (keyQt == Qt::Key_Backtab) {
             // KGlobalAccel on X11 has some workaround for Backtab
@@ -212,26 +209,14 @@ bool GlobalShortcutsManager::processKey(Qt::KeyboardModifiers mods, int keyQt)
             // in addition KWin registers the shortcut incorrectly as Alt+Shift+Backtab
             // this should be changed to either Alt+Backtab or Alt+Shift+Tab to match KKeySequenceWidget
             // trying the variants
-            if (check(mods | Qt::ShiftModifier, keyQt)) {
+            if (check(mods | Qt::ShiftModifier, keyQt, state)) {
                 return true;
+
             }
-            if (check(mods | Qt::ShiftModifier, Qt::Key_Tab)) {
+            if (check(mods | Qt::ShiftModifier, Qt::Key_Tab, state)) {
                 return true;
             }
         }
-    }
-#endif
-    return false;
-}
-
-bool GlobalShortcutsManager::processKeyRelease(Qt::KeyboardModifiers mods, int keyQt)
-{
-#if KWIN_BUILD_GLOBALSHORTCUTS
-    if (m_kglobalAccelInterface) {
-        QMetaObject::invokeMethod(m_kglobalAccelInterface,
-                                  "checkKeyReleased",
-                                  Qt::DirectConnection,
-                                  Q_ARG(int, int(mods) | keyQt));
     }
 #endif
     return false;

@@ -400,14 +400,14 @@ Q_SIGNALS:
 
     /**
      * A new desktop has been created
-     * @param desktop the new just crated desktop
+     * @param desktop the newly created desktop
      */
     void desktopAdded(KWin::VirtualDesktop *desktop);
 
     /**
      * A desktop has been removed and is about to be deleted
      * @param desktop the desktop that has been removed.
-     *          It's guaranteed to stil la valid pointer when the signal arrives,
+     *          It's guaranteed to still be a valid pointer when the signal arrives,
      *          but it's about to be deleted.
      */
     void desktopRemoved(KWin::VirtualDesktop *desktop);
@@ -425,7 +425,7 @@ Q_SIGNALS:
     void currentChanged(KWin::VirtualDesktop *previousDesktop, KWin::VirtualDesktop *newDesktop);
 
     /**
-     * Signal emmitted for realtime desktop switching animations.
+     * Signal emitted for realtime desktop switching animations.
      * @param currentDesktop The current virtual desktop
      * @param offset The current total change in desktop coordinate
      * Offset x and y are negative if switching Left and Down.
@@ -559,7 +559,7 @@ inline const QSize &VirtualDesktopGrid::size() const
 
 inline uint VirtualDesktopManager::maximum()
 {
-    return 20;
+    return 25;
 }
 
 inline uint VirtualDesktopManager::count() const

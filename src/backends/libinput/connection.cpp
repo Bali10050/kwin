@@ -252,7 +252,7 @@ void Connection::processEvents()
 
             connect(device, &Device::outputNameChanged, this, [this, device] {
                 // If the output name changes from something to empty we need to
-                // re-run the assignment heuristic so that an output is assinged
+                // re-run the assignment heuristic so that an output is assigned
                 if (device->outputName().isEmpty()) {
                     applyScreenToDevice(device);
                 }
@@ -566,6 +566,7 @@ void Connection::processEvents()
                                                        tabletEvent->position(),
                                                        tabletEvent->source() == LIBINPUT_TABLET_PAD_RING_SOURCE_FINGER,
                                                        tabletEvent->group(),
+                                                       tabletEvent->mode(),
                                                        tabletEvent->time(), tabletEvent->device());
             break;
         }
@@ -575,6 +576,7 @@ void Connection::processEvents()
                                                         tabletEvent->position(),
                                                         tabletEvent->source() == LIBINPUT_TABLET_PAD_STRIP_SOURCE_FINGER,
                                                         tabletEvent->group(),
+                                                        tabletEvent->mode(),
                                                         tabletEvent->time(), tabletEvent->device());
             break;
         }
@@ -607,10 +609,17 @@ void Connection::applyScreenToDevice(Device *device)
     }
 
     Output *deviceOutput = nullptr;
-    const QList<Output *> outputs = kwinApp()->outputBackend()->outputs();
+    const QList<Output *> outputs = workspace()->outputs();
 
     // let's try to find a screen for it
-    if (!device->outputName().isEmpty()) {
+    if (!device->outputUuid().isEmpty()) {
+        // use the UUID if possible, which is more stable than the output name
+        const auto it = std::ranges::find_if(outputs, [device](Output *output) {
+            return output->uuid() == device->outputUuid();
+        });
+        deviceOutput = it == outputs.end() ? nullptr : *it;
+    }
+    if (!deviceOutput && !device->outputName().isEmpty()) {
         // we have an output name, try to find a screen with matching name
         for (Output *output : outputs) {
             if (!output->isEnabled()) {
@@ -626,9 +635,6 @@ void Connection::applyScreenToDevice(Device *device)
         // do we have an internal screen?
         Output *internalOutput = nullptr;
         for (Output *output : outputs) {
-            if (!output->isEnabled()) {
-                continue;
-            }
             if (output->isInternal()) {
                 internalOutput = output;
                 break;
@@ -645,9 +651,6 @@ void Connection::applyScreenToDevice(Device *device)
         }
         // let's compare all screens for size
         for (Output *output : outputs) {
-            if (!output->isEnabled()) {
-                continue;
-            }
             if (testScreenMatches(output)) {
                 deviceOutput = output;
                 break;
@@ -661,10 +664,8 @@ void Connection::applyScreenToDevice(Device *device)
             } else {
                 for (Output *output : outputs) {
                     // just take first screen, we have no clue
-                    if (output->isEnabled()) {
-                        deviceOutput = output;
-                        break;
-                    }
+                    deviceOutput = output;
+                    break;
                 }
             }
         }

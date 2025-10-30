@@ -48,7 +48,6 @@
                 "Name[tr]": "Martin Flöser, Vlad Zahorodnii",
                 "Name[uk]": "Martin Flöser, Влад Завгородній",
                 "Name[vi]": "Martin Flöser, Vlad Zahorodnii",
-                "Name[x-test]": "xxMartin Flöser, Vlad Zahorodniixx",
                 "Name[zh_CN]": "Martin Flöser, Vlad Zahorodnii",
                 "Name[zh_TW]": "Martin Flöser, Vlad Zahorodnii"
             }
@@ -87,7 +86,7 @@
         "Description[nn]": "Gjer heile skjermen mørkare når det vert spurt om rottilgang",
         "Description[pl]": "Przyciemnia ekran przy żądaniu praw administratora",
         "Description[pt]": "Escurece o ecrã todo ao pedir privilégios de administração",
-        "Description[pt_BR]": "Escurece a tela inteira ao solicitar privilégios de root",
+        "Description[pt_BR]": "Escurece toda a tela ao solicitar privilégios de root",
         "Description[ro]": "Întunecă întregul ecran la cererea privilegiilor de root",
         "Description[ru]": "Затемнение всего экрана при запросе привилегий суперпользователя",
         "Description[sa]": "मूलविशेषाधिकारस्य अनुरोधं कुर्वन् सम्पूर्णं पटलं अन्धकारं करोति",
@@ -98,7 +97,6 @@
         "Description[tr]": "Yönetici ayrıcalıkları isterken tüm ekranı karartır",
         "Description[uk]": "Притлумлює кольори усього екрана, коли працюємо з доступом root",
         "Description[vi]": "Làm tối toàn bộ màn hình khi yêu cầu đặc quyền gốc",
-        "Description[x-test]": "xxDarkens the entire screen when requesting root privilegesxx",
         "Description[zh_CN]": "系统请求 root 权限时降低屏幕亮度",
         "Description[zh_TW]": "請求 root 權限時將整個螢幕變暗",
         "EnabledByDefault": true,
@@ -149,7 +147,6 @@
         "Name[tr]": "Yönetici Kipi için Ekranı Karart",
         "Name[uk]": "Притлумлення кольорів у режимі адміністратора",
         "Name[vi]": "Làm tối màn hình cho chế độ quản trị viên",
-        "Name[x-test]": "xxDim Screen for Administrator Modexx",
         "Name[zh_CN]": "请求管理员模式时降低屏幕亮度",
         "Name[zh_TW]": "為管理員模式暗化螢幕"
     },

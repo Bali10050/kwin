@@ -16,7 +16,6 @@ namespace KWin
 class AbstractDataSource;
 class DataDeviceInterface;
 class DataOfferInterface;
-class DataSourceInterface;
 class DragAndDropIcon;
 class SeatInterface;
 class SurfaceInterface;
@@ -32,18 +31,15 @@ public:
 
     SeatInterface *seat;
     DataDeviceInterface *q;
-    QPointer<DataSourceInterface> selection;
 
     struct Drag
     {
         SurfaceInterface *surface = nullptr;
         QPointer<DataOfferInterface> offer;
         QMetaObject::Connection destroyConnection;
-        QMetaObject::Connection posConnection;
         QMetaObject::Connection sourceActionConnection;
         QMetaObject::Connection targetActionConnection;
         QMetaObject::Connection keyboardModifiersConnection;
-        quint32 serial = 0;
     };
     Drag drag;
 

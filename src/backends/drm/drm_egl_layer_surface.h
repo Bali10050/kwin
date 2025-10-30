@@ -46,27 +46,21 @@ class EglGbmLayerSurface : public QObject
 public:
     enum class BufferTarget {
         Normal,
-        Linear,
         Dumb
     };
-    enum class FormatOption {
-        PreferAlpha,
-        RequireAlpha
-    };
-    EglGbmLayerSurface(DrmGpu *gpu, EglGbmBackend *eglBackend, BufferTarget target = BufferTarget::Normal, FormatOption formatOption = FormatOption::PreferAlpha);
+    explicit EglGbmLayerSurface(DrmGpu *gpu, EglGbmBackend *eglBackend, BufferTarget target = BufferTarget::Normal);
     ~EglGbmLayerSurface();
 
-    std::optional<OutputLayerBeginFrameInfo> startRendering(const QSize &bufferSize, OutputTransform transformation, const QHash<uint32_t, QList<uint64_t>> &formats, const ColorDescription &blendingColor, const ColorDescription &scanoutColor, const std::shared_ptr<IccProfile> &iccProfile, double scale, Output::ColorPowerTradeoff tradeoff, bool useShadowBuffer);
+    std::optional<OutputLayerBeginFrameInfo> startRendering(const QSize &bufferSize, OutputTransform transformation, const QHash<uint32_t, QList<uint64_t>> &formats, const std::shared_ptr<ColorDescription> &blendingColor, const std::shared_ptr<ColorDescription> &layerBlendingColor, const std::shared_ptr<IccProfile> &iccProfile, double scale, Output::ColorPowerTradeoff tradeoff, bool useShadowBuffer, uint32_t requiredAlphaBits);
     bool endRendering(const QRegion &damagedRegion, OutputFrame *frame);
 
-    std::shared_ptr<GLTexture> texture() const;
     void destroyResources();
     EglGbmBackend *eglBackend() const;
-    std::shared_ptr<DrmFramebuffer> renderTestBuffer(const QSize &bufferSize, const QHash<uint32_t, QList<uint64_t>> &formats, Output::ColorPowerTradeoff tradeoff);
+    std::shared_ptr<DrmFramebuffer> renderTestBuffer(const QSize &bufferSize, const QHash<uint32_t, QList<uint64_t>> &formats, Output::ColorPowerTradeoff tradeoff, uint32_t requiredAlphaBits);
     void forgetDamage();
 
     std::shared_ptr<DrmFramebuffer> currentBuffer() const;
-    const ColorDescription &colorDescription() const;
+    const std::shared_ptr<ColorDescription> &colorDescription() const;
 
 private:
     enum class MultiGpuImportMode {
@@ -79,6 +73,8 @@ private:
     struct Surface
     {
         ~Surface();
+
+        bool needsRecreation = false;
 
         std::shared_ptr<EglContext> context;
         std::shared_ptr<EglSwapchain> gbmSwapchain;
@@ -94,13 +90,14 @@ private:
         std::shared_ptr<DrmFramebuffer> currentFramebuffer;
         BufferTarget bufferTarget;
         double scale = 1;
+        uint32_t requiredAlphaBits = 0;
 
         // for color management
         bool needsShadowBuffer = false;
         std::shared_ptr<EglSwapchain> shadowSwapchain;
         std::shared_ptr<EglSwapchainSlot> currentShadowSlot;
-        ColorDescription scanoutColor = ColorDescription::sRGB;
-        ColorDescription blendingColor = ColorDescription::sRGB;
+        std::shared_ptr<ColorDescription> layerBlendingColor = ColorDescription::sRGB;
+        std::shared_ptr<ColorDescription> blendingColor = ColorDescription::sRGB;
         double brightness = 1.0;
         std::unique_ptr<IccShader> iccShader;
         std::shared_ptr<IccProfile> iccProfile;
@@ -109,10 +106,10 @@ private:
 
         std::unique_ptr<GLRenderTimeQuery> compositingTimeQuery;
     };
-    bool checkSurface(const QSize &size, const QHash<uint32_t, QList<uint64_t>> &formats, Output::ColorPowerTradeoff tradeoff);
-    bool doesSurfaceFit(Surface *surface, const QSize &size, const QHash<uint32_t, QList<uint64_t>> &formats, Output::ColorPowerTradeoff tradeoff) const;
-    std::unique_ptr<Surface> createSurface(const QSize &size, const QHash<uint32_t, QList<uint64_t>> &formats, Output::ColorPowerTradeoff tradeoff) const;
-    std::unique_ptr<Surface> createSurface(const QSize &size, uint32_t format, const QList<uint64_t> &modifiers, MultiGpuImportMode importMode, BufferTarget bufferTarget, Output::ColorPowerTradeoff tradeoff) const;
+    bool checkSurface(const QSize &size, const QHash<uint32_t, QList<uint64_t>> &formats, Output::ColorPowerTradeoff tradeoff, uint32_t requiredAlphaBits);
+    bool doesSurfaceFit(Surface *surface, const QSize &size, const QHash<uint32_t, QList<uint64_t>> &formats, Output::ColorPowerTradeoff tradeoff, uint32_t requiredAlphaBits) const;
+    std::unique_ptr<Surface> createSurface(const QSize &size, const QHash<uint32_t, QList<uint64_t>> &formats, Output::ColorPowerTradeoff tradeoff, uint32_t requiredAlphaBits) const;
+    std::unique_ptr<Surface> createSurface(const QSize &size, uint32_t format, const QList<uint64_t> &modifiers, MultiGpuImportMode importMode, BufferTarget bufferTarget, Output::ColorPowerTradeoff tradeoff, uint32_t requiredAlphaBits) const;
     std::shared_ptr<EglSwapchain> createGbmSwapchain(DrmGpu *gpu, EglContext *context, const QSize &size, uint32_t format, const QList<uint64_t> &modifiers, MultiGpuImportMode importMode, BufferTarget bufferTarget) const;
 
     std::shared_ptr<DrmFramebuffer> doRenderTestBuffer(Surface *surface) const;
@@ -126,7 +123,6 @@ private:
     DrmGpu *const m_gpu;
     EglGbmBackend *const m_eglBackend;
     const BufferTarget m_requestedBufferTarget;
-    const FormatOption m_formatOption;
 };
 
 }

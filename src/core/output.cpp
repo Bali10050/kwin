@@ -431,6 +431,11 @@ QRectF Output::mapToGlobal(const QRectF &rect) const
     return rect.translated(geometry().topLeft());
 }
 
+QRegion Output::mapToGlobal(const QRegion &region) const
+{
+    return region.translated(geometry().topLeft());
+}
+
 QPointF Output::mapToGlobal(const QPointF &pos) const
 {
     return pos + geometry().topLeft();
@@ -620,7 +625,7 @@ void Output::setState(const State &state)
     if (oldState.vrrPolicy != state.vrrPolicy) {
         Q_EMIT vrrPolicyChanged();
     }
-    if (oldState.colorDescription != state.colorDescription) {
+    if (*oldState.colorDescription != *state.colorDescription) {
         Q_EMIT colorDescriptionChanged();
     }
     if (oldState.colorProfileSource != state.colorProfileSource) {
@@ -651,6 +656,9 @@ void Output::setState(const State &state)
     }
     if (oldState.edrPolicy != state.edrPolicy) {
         Q_EMIT edrPolicyChanged();
+    }
+    if (oldState.blendingColor != state.blendingColor) {
+        Q_EMIT blendingColorChanged();
     }
     if (oldState.enabled != state.enabled) {
         Q_EMIT enabledChanged();
@@ -749,7 +757,7 @@ QByteArray Output::mstPath() const
     return m_information.mstPath;
 }
 
-const ColorDescription &Output::colorDescription() const
+const std::shared_ptr<ColorDescription> &Output::colorDescription() const
 {
     return m_state.colorDescription;
 }
@@ -880,13 +888,41 @@ std::optional<uint32_t> Output::minVrrRefreshRateHz() const
     return m_information.minVrrRefreshRateHz;
 }
 
-bool Output::updateCursorLayer(std::optional<std::chrono::nanoseconds> allowedVrrDelay)
+bool Output::presentAsync(OutputLayer *layer, std::optional<std::chrono::nanoseconds> allowedVrrDelay)
 {
     return false;
 }
 
 void Output::repairPresentation()
 {
+}
+
+const std::shared_ptr<ColorDescription> &Output::blendingColor() const
+{
+    return m_state.blendingColor;
+}
+
+const std::shared_ptr<ColorDescription> &Output::layerBlendingColor() const
+{
+    return m_state.layerBlendingColor;
+}
+
+// TODO move these quirks to libdisplay-info?
+static const std::array s_brokenDdcCi = {
+    std::make_pair(QByteArrayLiteral("SAM"), QByteArrayLiteral("Odyssey G5")),
+};
+
+bool Output::isDdcCiKnownBroken() const
+{
+    return m_information.edid.isValid() && std::ranges::any_of(s_brokenDdcCi, [this](const auto &pair) {
+        return m_information.edid.eisaId() == pair.first
+            && m_information.edid.monitorName() == pair.second;
+    });
+}
+
+bool Output::overlayLayersLikelyBroken() const
+{
+    return false;
 }
 
 } // namespace KWin

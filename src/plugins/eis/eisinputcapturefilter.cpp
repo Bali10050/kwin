@@ -105,46 +105,51 @@ bool EisInputCaptureFilter::keyboardKey(KeyboardKeyEvent *event)
     return true;
 }
 
-bool EisInputCaptureFilter::touchDown(qint32 id, const QPointF &pos, std::chrono::microseconds time)
+bool EisInputCaptureFilter::touchDown(TouchDownEvent *event)
 {
     if (!m_manager->activeCapture()) {
         return false;
     }
     if (const auto abs = m_manager->activeCapture()->absoluteDevice()) {
         auto touch = eis_device_touch_new(abs);
-        m_touches.insert(id, touch);
-        eis_touch_down(touch, pos.x(), pos.y());
+        m_touches.insert(event->id, touch);
+        eis_touch_down(touch, event->pos.x(), event->pos.y());
     }
     return true;
 }
 
-bool EisInputCaptureFilter::touchMotion(qint32 id, const QPointF &pos, std::chrono::microseconds time)
+bool EisInputCaptureFilter::touchMotion(TouchMotionEvent *event)
 {
     if (!m_manager->activeCapture()) {
         return false;
     }
-    if (auto touch = m_touches.value(id)) {
-        eis_touch_motion(touch, pos.x(), pos.y());
+    if (auto touch = m_touches.value(event->id)) {
+        eis_touch_motion(touch, event->pos.x(), event->pos.y());
     }
     return true;
 }
 
-bool EisInputCaptureFilter::touchUp(qint32 id, std::chrono::microseconds time)
+bool EisInputCaptureFilter::touchUp(TouchUpEvent *event)
 {
     if (!m_manager->activeCapture()) {
         return false;
     }
-    if (auto touch = m_touches.take(id)) {
+    if (auto touch = m_touches.take(event->id)) {
         eis_touch_up(touch);
         eis_touch_unref(touch);
     }
-    return false;
+    return true;
 }
 bool EisInputCaptureFilter::touchCancel()
 {
     if (!m_manager->activeCapture()) {
         return false;
     }
+    for (const auto touch : m_touches) {
+        eis_touch_cancel(touch);
+        eis_touch_unref(touch);
+    }
+    m_touches.clear();
     return true;
 }
 bool EisInputCaptureFilter::touchFrame()
@@ -158,29 +163,14 @@ bool EisInputCaptureFilter::touchFrame()
     return true;
 }
 
-bool EisInputCaptureFilter::pinchGestureBegin(int fingerCount, std::chrono::microseconds time)
+bool EisInputCaptureFilter::pinchGestureBegin(PointerPinchGestureBeginEvent *event)
 {
     if (!m_manager->activeCapture()) {
         return false;
     }
     return true;
 }
-bool EisInputCaptureFilter::pinchGestureUpdate(qreal scale, qreal angleDelta, const QPointF &delta, std::chrono::microseconds time)
-{
-    if (!m_manager->activeCapture()) {
-        return false;
-    }
-    return true;
-}
-
-bool EisInputCaptureFilter::pinchGestureEnd(std::chrono::microseconds time)
-{
-    if (!m_manager->activeCapture()) {
-        return false;
-    }
-    return true;
-}
-bool EisInputCaptureFilter::pinchGestureCancelled(std::chrono::microseconds time)
+bool EisInputCaptureFilter::pinchGestureUpdate(PointerPinchGestureUpdateEvent *event)
 {
     if (!m_manager->activeCapture()) {
         return false;
@@ -188,28 +178,14 @@ bool EisInputCaptureFilter::pinchGestureCancelled(std::chrono::microseconds time
     return true;
 }
 
-bool EisInputCaptureFilter::swipeGestureBegin(int fingerCount, std::chrono::microseconds time)
+bool EisInputCaptureFilter::pinchGestureEnd(PointerPinchGestureEndEvent *event)
 {
     if (!m_manager->activeCapture()) {
         return false;
     }
     return true;
 }
-bool EisInputCaptureFilter::swipeGestureUpdate(const QPointF &delta, std::chrono::microseconds time)
-{
-    if (!m_manager->activeCapture()) {
-        return false;
-    }
-    return true;
-}
-bool EisInputCaptureFilter::swipeGestureEnd(std::chrono::microseconds time)
-{
-    if (!m_manager->activeCapture()) {
-        return false;
-    }
-    return true;
-}
-bool EisInputCaptureFilter::swipeGestureCancelled(std::chrono::microseconds time)
+bool EisInputCaptureFilter::pinchGestureCancelled(PointerPinchGestureCancelEvent *event)
 {
     if (!m_manager->activeCapture()) {
         return false;
@@ -217,21 +193,50 @@ bool EisInputCaptureFilter::swipeGestureCancelled(std::chrono::microseconds time
     return true;
 }
 
-bool EisInputCaptureFilter::holdGestureBegin(int fingerCount, std::chrono::microseconds time)
+bool EisInputCaptureFilter::swipeGestureBegin(PointerSwipeGestureBeginEvent *event)
 {
     if (!m_manager->activeCapture()) {
         return false;
     }
     return true;
 }
-bool EisInputCaptureFilter::holdGestureEnd(std::chrono::microseconds time)
+bool EisInputCaptureFilter::swipeGestureUpdate(PointerSwipeGestureUpdateEvent *event)
 {
     if (!m_manager->activeCapture()) {
         return false;
     }
     return true;
 }
-bool EisInputCaptureFilter::holdGestureCancelled(std::chrono::microseconds time)
+bool EisInputCaptureFilter::swipeGestureEnd(PointerSwipeGestureEndEvent *event)
+{
+    if (!m_manager->activeCapture()) {
+        return false;
+    }
+    return true;
+}
+bool EisInputCaptureFilter::swipeGestureCancelled(PointerSwipeGestureCancelEvent *event)
+{
+    if (!m_manager->activeCapture()) {
+        return false;
+    }
+    return true;
+}
+
+bool EisInputCaptureFilter::holdGestureBegin(PointerHoldGestureBeginEvent *event)
+{
+    if (!m_manager->activeCapture()) {
+        return false;
+    }
+    return true;
+}
+bool EisInputCaptureFilter::holdGestureEnd(PointerHoldGestureEndEvent *event)
+{
+    if (!m_manager->activeCapture()) {
+        return false;
+    }
+    return true;
+}
+bool EisInputCaptureFilter::holdGestureCancelled(PointerHoldGestureCancelEvent *event)
 {
     if (!m_manager->activeCapture()) {
         return false;

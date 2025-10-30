@@ -15,24 +15,28 @@ qt6_generate_wayland_protocol_client_sources(KWinIntegrationTestFramework
     ${private_code_option}
     FILES
         ${CMAKE_SOURCE_DIR}/src/wayland/protocols/wlr-layer-shell-unstable-v1.xml
+        ${CMAKE_SOURCE_DIR}/src/wayland/protocols/xx-session-management-v1.xml
         ${WaylandProtocols_DATADIR}/stable/presentation-time/presentation-time.xml
+        ${WaylandProtocols_DATADIR}/stable/tablet/tablet-v2.xml
         ${WaylandProtocols_DATADIR}/stable/xdg-shell/xdg-shell.xml
         ${WaylandProtocols_DATADIR}/staging/color-management/color-management-v1.xml
-        ${WaylandProtocols_DATADIR}/stable/tablet/tablet-v2.xml
         ${WaylandProtocols_DATADIR}/staging/cursor-shape/cursor-shape-v1.xml
         ${WaylandProtocols_DATADIR}/staging/fifo/fifo-v1.xml
         ${WaylandProtocols_DATADIR}/staging/fractional-scale/fractional-scale-v1.xml
         ${WaylandProtocols_DATADIR}/staging/security-context/security-context-v1.xml
+        ${WaylandProtocols_DATADIR}/staging/xdg-activation/xdg-activation-v1.xml
         ${WaylandProtocols_DATADIR}/staging/xdg-dialog/xdg-dialog-v1.xml
         ${WaylandProtocols_DATADIR}/unstable/idle-inhibit/idle-inhibit-unstable-v1.xml
+        ${WaylandProtocols_DATADIR}/unstable/primary-selection/primary-selection-unstable-v1.xml
         ${WaylandProtocols_DATADIR}/unstable/text-input/text-input-unstable-v3.xml
         ${WaylandProtocols_DATADIR}/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml
 
+        ${PLASMA_WAYLAND_PROTOCOLS_DIR}/fake-input.xml
         ${PLASMA_WAYLAND_PROTOCOLS_DIR}/kde-output-device-v2.xml
         ${PLASMA_WAYLAND_PROTOCOLS_DIR}/kde-output-management-v2.xml
         ${PLASMA_WAYLAND_PROTOCOLS_DIR}/kde-screen-edge-v1.xml
+        ${PLASMA_WAYLAND_PROTOCOLS_DIR}/keystate.xml
         ${PLASMA_WAYLAND_PROTOCOLS_DIR}/zkde-screencast-unstable-v1.xml
-        ${PLASMA_WAYLAND_PROTOCOLS_DIR}/fake-input.xml
 )
 target_sources(KWinIntegrationTestFramework PRIVATE
     generic_scene_opengl_test.cpp
@@ -47,6 +51,7 @@ target_link_libraries(KWinIntegrationTestFramework
         Wayland::Client
         Libdrm::Libdrm
         kwin
+        XKB::XKB
 
     PRIVATE
         # Static plugins
@@ -127,7 +132,6 @@ integrationTest(NAME testOutputChanges SRCS outputchanges_test.cpp LIBS XCB::ICC
 integrationTest(NAME testTiles SRCS tiles_test.cpp LIBS XCB::ICCCM)
 integrationTest(NAME testFractionalScaling SRCS fractional_scaling_test.cpp)
 integrationTest(NAME testMoveResize SRCS move_resize_window_test.cpp LIBS XCB::ICCCM)
-integrationTest(NAME testShade SRCS shade_test.cpp LIBS XCB::ICCCM KDecoration3::KDecoration)
 integrationTest(NAME testDontCrashAuroraeDestroyDeco SRCS dont_crash_aurorae_destroy_deco.cpp LIBS XCB::ICCCM KDecoration3::KDecoration)
 integrationTest(NAME testPlasmaWindow SRCS plasmawindow_test.cpp LIBS XCB::ICCCM)
 integrationTest(NAME testX11DesktopWindow SRCS desktop_window_x11_test.cpp LIBS XCB::ICCCM)
@@ -148,10 +152,18 @@ integrationTest(NAME testColorManagement SRCS test_colormanagement.cpp)
 integrationTest(NAME testKeyboardInput SRCS keyboard_input_test.cpp)
 integrationTest(NAME testFifo SRCS test_fifo.cpp)
 integrationTest(NAME testMouseKeys SRCS mouse_keys_test.cpp)
+integrationTest(NAME testXdgSession SRCS xdgsession_test.cpp)
+integrationTest(NAME testDnd SRCS dnd_test.cpp)
+integrationTest(NAME testFractionalRepaint SRCS fractional_repaint_test.cpp)
+integrationTest(NAME testDrm SRCS drm_test.cpp)
+integrationTest(NAME testDrmLegacy SRCS drm_test.cpp)
+target_compile_definitions(testDrmLegacy PRIVATE FORCE_DRM_LEGACY=1)
+integrationTest(NAME testSelection SRCS selection_test.cpp)
 
 if(KWIN_BUILD_X11)
     integrationTest(NAME testDontCrashEmptyDeco SRCS dont_crash_empty_deco.cpp LIBS KDecoration3::KDecoration)
-    integrationTest(NAME testXwaylandSelections SRCS xwayland_selections_test.cpp)
+    integrationTest(NAME testXwaylandDnd SRCS xwayland_dnd_test.cpp LIBS XCB::ICCCM)
+    integrationTest(NAME testXwaylandSelection SRCS xwayland_selection_test.cpp LIBS XCB::ICCCM)
     integrationTest(NAME testXinerama SRCS xinerama_test.cpp)
     integrationTest(NAME testX11KeyRead SRCS x11keyread.cpp LIBS XCB::XINPUT)
 endif()

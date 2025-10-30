@@ -111,10 +111,14 @@ ButtonRebindsFilter::ButtonRebindsFilter()
 {
     const QLatin1String groupName("ButtonRebinds");
     connect(m_configWatcher.get(), &KConfigWatcher::configChanged, this, [this, groupName](const KConfigGroup &group) {
-        if (group.parent().name() == groupName) {
-            loadConfig(group.parent());
-        } else if (group.parent().parent().name() == groupName) {
-            loadConfig(group.parent().parent());
+        // We want to get the top-most parent in the config file, since our ButtonRebinds configs tend to be very nested
+        auto parent = group.parent();
+        while (parent.name() != "<default>") {
+            if (parent.name() == groupName) {
+                loadConfig(parent);
+                return;
+            }
+            parent = parent.parent();
         }
     });
     loadConfig(m_configWatcher->config()->group(groupName));
@@ -149,7 +153,7 @@ void ButtonRebindsFilter::loadConfig(const KConfigGroup &group)
         const int mappedButton = mouseButtonEnum.keyToValue(configKey.toLatin1());
         if (mappedButton != -1) {
             const auto action = mouseGroup.readEntry(configKey, QStringList());
-            insert(Pointer, {QString(), static_cast<uint>(mappedButton)}, action);
+            insert(Pointer, {QString(), static_cast<uint>(mappedButton), 0}, action);
             foundActions = true;
         }
     }
@@ -165,7 +169,7 @@ void ButtonRebindsFilter::loadConfig(const KConfigGroup &group)
             const uint button = buttonName.toUInt(&ok);
             if (ok) {
                 foundActions = true;
-                insert(TabletPad, {tabletName, button}, entry);
+                insert(TabletPad, {tabletName, button, 0}, entry);
             }
         }
     }
@@ -181,7 +185,44 @@ void ButtonRebindsFilter::loadConfig(const KConfigGroup &group)
             const uint button = buttonName.toUInt(&ok);
             if (ok) {
                 foundActions = true;
-                insert(TabletToolButtonType, {tabletToolName, button}, entry);
+                insert(TabletToolButtonType, {tabletToolName, button, 0}, entry);
+            }
+        }
+    }
+
+    const auto tabletDialsGroup = group.group(QStringLiteral("TabletDial"));
+    const auto tabletDials = tabletDialsGroup.groupList();
+    for (const auto &tabletDialName : tabletDials) {
+        const auto dialGroup = tabletDialsGroup.group(tabletDialName);
+        const auto tabletDialButtons = dialGroup.keyList();
+        for (const auto &buttonName : tabletDialButtons) {
+            const auto entry = dialGroup.readEntry(buttonName, QStringList());
+            bool ok = false;
+            const uint button = buttonName.toUInt(&ok);
+            if (ok) {
+                foundActions = true;
+                insert(TabletDial, {tabletDialName, button, 0}, entry);
+            }
+        }
+    }
+
+    const auto tabletRingsGroup = group.group(QStringLiteral("TabletRing"));
+    const auto tabletRings = tabletRingsGroup.groupList();
+    for (const auto &tabletRingName : tabletRings) {
+        const auto ringModesGroup = tabletRingsGroup.group(tabletRingName);
+        for (const auto &modeGroupName : ringModesGroup.groupList()) {
+            const auto ringGroup = ringModesGroup.group(modeGroupName);
+            const auto tabletRingButtons = ringGroup.keyList();
+            for (const auto &buttonName : tabletRingButtons) {
+                const auto entry = ringGroup.readEntry(buttonName, QStringList());
+                bool buttonOk = false;
+                const uint button = buttonName.toUInt(&buttonOk);
+                bool modeOk = false;
+                const uint mode = modeGroupName.toUInt(&modeOk);
+                if (buttonOk && modeOk) {
+                    foundActions = true;
+                    insert(TabletRing, {tabletRingName, button, mode}, entry);
+                }
             }
         }
     }
@@ -200,7 +241,7 @@ bool ButtonRebindsFilter::pointerButton(KWin::PointerButtonEvent *event)
         return false;
     }
 
-    return send(Pointer, {{}, event->button}, event->state == KWin::PointerButtonState::Pressed, event->timestamp);
+    return send(Pointer, {{}, event->button, 0}, event->state == KWin::PointerButtonState::Pressed, 0, event->timestamp);
 }
 
 bool ButtonRebindsFilter::tabletToolProximityEvent(KWin::TabletToolProximityEvent *event)
@@ -235,7 +276,7 @@ bool ButtonRebindsFilter::tabletPadButtonEvent(KWin::TabletPadButtonEvent *event
     if (RebindScope::isRebinding()) {
         return false;
     }
-    return send(TabletPad, {event->device->name(), event->button}, event->pressed, event->time);
+    return send(TabletPad, {event->device->name(), event->button, 0}, event->pressed, 0, event->time);
 }
 
 bool ButtonRebindsFilter::tabletToolButtonEvent(KWin::TabletToolButtonEvent *event)
@@ -244,7 +285,60 @@ bool ButtonRebindsFilter::tabletToolButtonEvent(KWin::TabletToolButtonEvent *eve
         return false;
     }
     m_tabletTool = event->tool;
-    return send(TabletToolButtonType, {event->device->name(), event->button}, event->pressed, event->time);
+    return send(TabletToolButtonType, {event->device->name(), event->button, 0}, event->pressed, 0, event->time);
+}
+
+bool ButtonRebindsFilter::tabletPadDialEvent(KWin::TabletPadDialEvent *event)
+{
+    if (RebindScope::isRebinding()) {
+        return false;
+    }
+    return send(TabletDial, {event->device->name(), static_cast<uint>(event->number), 0}, false, event->delta, event->time);
+}
+
+bool ButtonRebindsFilter::tabletPadRingEvent(KWin::TabletPadRingEvent *event)
+{
+    if (RebindScope::isRebinding()) {
+        return false;
+    }
+
+    // We only get the ring's position in degrees
+    // So we need to start when it's pressed, and stop when released (that's given as -1)
+    // And only emit events with the delta passes a certain threshold
+    if (event->position != -1) {
+        if (m_initialRingPosition == -1) {
+            m_initialRingPosition = event->position;
+        }
+
+        // The maximum number of degrees a device could ever go from one position to the other. This is completely arbitrary.
+        // I would guarantee that most devices emit ring events in small, ~5 degree increments, but *we don't know* how big their increments are but it's safe to assume it's less than this.
+        constexpr int maximumIncrement = 180;
+
+        int delta = m_initialRingPosition - event->position;
+
+        // If the delta is something crazy, and could never be feasibly emitted by the device, then it's probably
+        // because we made a complete circle.
+        // For example, going from 0->355. That's a delta of 5 degrees, not -355 degrees!
+        if (abs(delta) > maximumIncrement) {
+            if (delta < 0) {
+                delta += 360;
+            } else {
+                delta -= 360;
+            }
+        }
+
+        // Rings seem to have a minimum delta of 5 degrees, so we can assume that's one "unit".
+        const bool sent = send(TabletRing, {event->device->name(), static_cast<uint>(event->number), event->mode}, false, delta * 120, event->time);
+        // If accepted (that means the threshold is met) then we want to reset ourselves
+        if (sent) {
+            m_initialRingPosition = event->position;
+        }
+        return sent;
+    } else {
+        m_initialRingPosition = -1;
+    }
+
+    return false;
 }
 
 void ButtonRebindsFilter::insert(TriggerType type, const Trigger &trigger, const QStringList &entry)
@@ -262,6 +356,19 @@ void ButtonRebindsFilter::insert(TriggerType type, const Trigger &trigger, const
         const auto keys = QKeySequence::fromString(entry.at(1), QKeySequence::PortableText);
         if (!keys.isEmpty()) {
             m_actions.at(type).insert(trigger, keys);
+        }
+    } else if (entry.first() == QLatin1String("AxisKey")) {
+        if (entry.size() != 4) {
+            qCWarning(KWIN_BUTTONREBINDS) << "Invalid axis key" << entry;
+            return;
+        }
+
+        const auto upKey = QKeySequence::fromString(entry.at(1), QKeySequence::PortableText);
+        const auto downKey = QKeySequence::fromString(entry.at(2), QKeySequence::PortableText);
+        const auto threshold = entry.at(3).toInt();
+
+        if (!upKey.isEmpty() && !downKey.isEmpty()) {
+            m_actions.at(type).insert(trigger, AxisKeybind{upKey, downKey, threshold});
         }
     } else if (entry.first() == QLatin1String("MouseButton")) {
         if (entry.size() < 2) {
@@ -297,12 +404,14 @@ void ButtonRebindsFilter::insert(TriggerType type, const Trigger &trigger, const
         } else {
             qCWarning(KWIN_BUTTONREBINDS) << "Could not convert" << entry << "into a mouse button";
         }
+    } else if (entry.first() == QLatin1String("Scroll")) {
+        m_actions.at(type).insert(trigger, ScrollWheel{});
     } else if (entry.first() == QLatin1String("Disabled")) {
         m_actions.at(type).insert(trigger, DisabledButton{});
     }
 }
 
-bool ButtonRebindsFilter::send(TriggerType type, const Trigger &trigger, bool pressed, std::chrono::microseconds timestamp)
+bool ButtonRebindsFilter::send(TriggerType type, const Trigger &trigger, bool pressed, double delta, std::chrono::microseconds timestamp)
 {
     const auto &typeActions = m_actions.at(type);
     if (typeActions.isEmpty()) {
@@ -310,8 +419,20 @@ bool ButtonRebindsFilter::send(TriggerType type, const Trigger &trigger, bool pr
     }
 
     const auto &action = typeActions[trigger];
-    if (const QKeySequence *seq = std::get_if<QKeySequence>(&action)) {
+    if (const QKeySequence *seq = std::get_if<SingleKeybind>(&action)) {
         return sendKeySequence(*seq, pressed, timestamp);
+    }
+    if (const AxisKeybind *bind = std::get_if<AxisKeybind>(&action)) {
+        if (std::abs(delta) < bind->threshold) {
+            return false;
+        }
+
+        const auto sequence = delta > 0 ? bind->up : bind->down;
+
+        bool sentKeyEvent = false;
+        sentKeyEvent |= sendKeySequence(sequence, true, timestamp);
+        sentKeyEvent |= sendKeySequence(sequence, false, timestamp);
+        return sentKeyEvent;
     }
     if (const auto mb = std::get_if<MouseButton>(&action)) {
         bool sentMouseEvent = false;
@@ -327,6 +448,17 @@ bool ButtonRebindsFilter::send(TriggerType type, const Trigger &trigger, bool pr
     }
     if (const auto tb = std::get_if<TabletToolButton>(&action)) {
         return sendTabletToolButton(tb->button, pressed, timestamp);
+    }
+    if (std::get_if<ScrollWheel>(&action)) {
+        bool sentMouseEvent = false;
+        if (type != Pointer) {
+            sentMouseEvent |= sendMousePosition(m_tabletCursorPos, timestamp);
+        }
+        sentMouseEvent |= sendScrollWheel(delta, timestamp);
+        if (sentMouseEvent) {
+            sendMouseFrame();
+        }
+        return sentMouseEvent;
     }
     if (std::get_if<DisabledButton>(&action)) {
         // Intentional, we don't want to anything to anybody
@@ -356,7 +488,7 @@ bool ButtonRebindsFilter::sendKeySequence(const QKeySequence &keys, bool pressed
 
     // handle modifier-only keys
     for (const auto &[keySymQt, keySymLinux] : s_modifierKeyTable) {
-        if (key == keySymQt) {
+        if (key == QKeyCombination::fromCombined(keySymQt)) {
             RebindScope scope;
             sendKey(keySymLinux);
             return true;
@@ -368,7 +500,7 @@ bool ButtonRebindsFilter::sendKeySequence(const QKeySequence &keys, bool pressed
     // Use keysyms from the keypad if and only if KeypadModifier is set
     syms.erase(std::remove_if(syms.begin(), syms.end(), [keys](int sym) {
         bool onKeyPad = sym >= XKB_KEY_KP_Space && sym <= XKB_KEY_KP_Equal;
-        if (keys[0] & Qt::KeypadModifier) {
+        if (keys[0].keyboardModifiers() & Qt::KeypadModifier) {
             return !onKeyPad;
         } else {
             return onKeyPad;
@@ -380,38 +512,35 @@ bool ButtonRebindsFilter::sendKeySequence(const QKeySequence &keys, bool pressed
         qCWarning(KWIN_BUTTONREBINDS) << "Could not convert" << keys << "to keysym";
         return false;
     }
+    std::optional<KWin::Xkb::KeyCode> code;
     // KKeyServer returns upper case syms, lower it to not confuse modifiers handling
-    std::optional<int> keyCode;
-    std::optional<int> level;
     for (int sym : syms) {
-        auto code = KWin::input()->keyboard()->xkb()->keycodeFromKeysym(sym);
+        code = KWin::input()->keyboard()->xkb()->keycodeFromKeysym(sym);
         if (code) {
-            keyCode = code->first;
-            level = code->second;
             break;
         }
     }
-    if (!keyCode) {
+    if (!code) {
         qCWarning(KWIN_BUTTONREBINDS) << "Could not convert" << keys << "syms: " << syms << "to keycode";
         return false;
     }
 
     RebindScope scope;
 
-    if (key & Qt::ShiftModifier || level == 1) {
+    if (key.keyboardModifiers() & Qt::ShiftModifier || code->level == 1) {
         sendKey(KEY_LEFTSHIFT);
     }
-    if (key & Qt::ControlModifier) {
+    if (key.keyboardModifiers() & Qt::ControlModifier) {
         sendKey(KEY_LEFTCTRL);
     }
-    if (key & Qt::AltModifier) {
+    if (key.keyboardModifiers() & Qt::AltModifier) {
         sendKey(KEY_LEFTALT);
     }
-    if (key & Qt::MetaModifier) {
+    if (key.keyboardModifiers() & Qt::MetaModifier) {
         sendKey(KEY_LEFTMETA);
     }
 
-    sendKey(keyCode.value());
+    sendKey(code->keyCode);
     return true;
 }
 
@@ -470,6 +599,14 @@ bool ButtonRebindsFilter::sendTabletToolButton(quint32 button, bool pressed, std
     }
     RebindScope scope;
     Q_EMIT m_inputDevice->tabletToolButtonEvent(button, pressed, m_tabletTool, time, m_inputDevice.get());
+    return true;
+}
+
+bool ButtonRebindsFilter::sendScrollWheel(double v120, std::chrono::microseconds time)
+{
+    RebindScope scope;
+    Q_EMIT m_inputDevice->pointerAxisChanged(KWin::PointerAxis::Vertical, v120 > 0 ? 15 : -15, v120, KWin::PointerAxisSource::Wheel, false, time, m_inputDevice.get());
+    Q_EMIT m_inputDevice->pointerFrame(m_inputDevice.get());
     return true;
 }
 

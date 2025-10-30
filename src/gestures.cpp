@@ -16,44 +16,28 @@
 namespace KWin
 {
 
-Gesture::Gesture(QObject *parent)
-    : QObject(parent)
+Gesture::Gesture()
 {
 }
 
 Gesture::~Gesture() = default;
 
-SwipeGesture::SwipeGesture(QObject *parent)
-    : Gesture(parent)
+SwipeGesture::SwipeGesture(uint32_t fingerCount)
+    : m_fingerCount(fingerCount)
 {
 }
 
 SwipeGesture::~SwipeGesture() = default;
 
-void SwipeGesture::setStartGeometry(const QRect &geometry)
-{
-    setMinimumX(geometry.x());
-    setMinimumY(geometry.y());
-    setMaximumX(geometry.x() + geometry.width());
-    setMaximumY(geometry.y() + geometry.height());
-
-    Q_ASSERT(m_maximumX >= m_minimumX);
-    Q_ASSERT(m_maximumY >= m_minimumY);
-}
-
 qreal SwipeGesture::deltaToProgress(const QPointF &delta) const
 {
-    if (!m_minimumDeltaRelevant || m_minimumDelta.isNull()) {
-        return 1.0;
-    }
-
     switch (m_direction) {
     case SwipeDirection::Up:
     case SwipeDirection::Down:
-        return std::min(std::abs(delta.y()) / std::abs(m_minimumDelta.y()), 1.0);
+        return std::min(std::abs(delta.y()) / s_minimumDelta, 1.0);
     case SwipeDirection::Left:
     case SwipeDirection::Right:
-        return std::min(std::abs(delta.x()) / std::abs(m_minimumDelta.x()), 1.0);
+        return std::min(std::abs(delta.x()) / s_minimumDelta, 1.0);
     default:
         Q_UNREACHABLE();
     }
@@ -64,8 +48,8 @@ bool SwipeGesture::minimumDeltaReached(const QPointF &delta) const
     return deltaToProgress(delta) >= 1.0;
 }
 
-PinchGesture::PinchGesture(QObject *parent)
-    : Gesture(parent)
+PinchGesture::PinchGesture(uint32_t fingerCount)
+    : m_fingerCount(fingerCount)
 {
 }
 
@@ -73,7 +57,7 @@ PinchGesture::~PinchGesture() = default;
 
 qreal PinchGesture::scaleDeltaToProgress(const qreal &scaleDelta) const
 {
-    return std::abs(scaleDelta - 1) / minimumScaleDelta();
+    return std::abs(scaleDelta - 1) / s_minimumScaleDelta;
 }
 
 bool PinchGesture::minimumScaleDeltaReached(const qreal &scaleDelta) const
@@ -130,7 +114,7 @@ void GestureRecognizer::unregisterPinchGesture(KWin::PinchGesture *gesture)
     }
 }
 
-int GestureRecognizer::startSwipeGesture(uint fingerCount, const QPointF &startPos, StartPositionBehavior startPosBehavior)
+int GestureRecognizer::startSwipeGesture(uint fingerCount, const QPointF &startPos)
 {
     m_currentFingerCount = fingerCount;
     if (!m_activeSwipeGestures.isEmpty() || !m_activePinchGestures.isEmpty()) {
@@ -138,37 +122,8 @@ int GestureRecognizer::startSwipeGesture(uint fingerCount, const QPointF &startP
     }
     int count = 0;
     for (SwipeGesture *gesture : std::as_const(m_swipeGestures)) {
-        if (gesture->minimumFingerCountIsRelevant()) {
-            if (gesture->minimumFingerCount() > fingerCount) {
-                continue;
-            }
-        }
-        if (gesture->maximumFingerCountIsRelevant()) {
-            if (gesture->maximumFingerCount() < fingerCount) {
-                continue;
-            }
-        }
-        if (startPosBehavior == StartPositionBehavior::Relevant) {
-            if (gesture->minimumXIsRelevant()) {
-                if (gesture->minimumX() > startPos.x()) {
-                    continue;
-                }
-            }
-            if (gesture->maximumXIsRelevant()) {
-                if (gesture->maximumX() < startPos.x()) {
-                    continue;
-                }
-            }
-            if (gesture->minimumYIsRelevant()) {
-                if (gesture->minimumY() > startPos.y()) {
-                    continue;
-                }
-            }
-            if (gesture->maximumYIsRelevant()) {
-                if (gesture->maximumY() < startPos.y()) {
-                    continue;
-                }
-            }
+        if (gesture->fingerCount() != fingerCount) {
+            continue;
         }
 
         // Only add gestures who's direction aligns with current swipe axis
@@ -244,12 +199,9 @@ void GestureRecognizer::updateSwipeGesture(const QPointF &delta)
             auto g = static_cast<SwipeGesture *>(*it);
 
             if (g->direction() != direction) {
-                // If a gesture was started from a touchscreen border never cancel it
-                if (!g->minimumXIsRelevant() || !g->maximumXIsRelevant() || !g->minimumYIsRelevant() || !g->maximumYIsRelevant()) {
-                    Q_EMIT g->cancelled();
-                    it = m_activeSwipeGestures.erase(it);
-                    continue;
-                }
+                Q_EMIT g->cancelled();
+                it = m_activeSwipeGestures.erase(it);
+                continue;
             }
 
             it++;
@@ -310,15 +262,8 @@ int GestureRecognizer::startPinchGesture(uint fingerCount)
         return 0;
     }
     for (PinchGesture *gesture : std::as_const(m_pinchGestures)) {
-        if (gesture->minimumFingerCountIsRelevant()) {
-            if (gesture->minimumFingerCount() > fingerCount) {
-                continue;
-            }
-        }
-        if (gesture->maximumFingerCountIsRelevant()) {
-            if (gesture->maximumFingerCount() < fingerCount) {
-                continue;
-            }
+        if (gesture->fingerCount() != fingerCount) {
+            continue;
         }
 
         // direction doesn't matter yet
@@ -388,36 +333,9 @@ void GestureRecognizer::endPinchGesture() // because fingers up
     m_currentSwipeAxis = Axis::None;
 }
 
-bool SwipeGesture::maximumFingerCountIsRelevant() const
+uint32_t SwipeGesture::fingerCount() const
 {
-    return m_maximumFingerCountRelevant;
-}
-
-uint SwipeGesture::minimumFingerCount() const
-{
-    return m_minimumFingerCount;
-}
-
-void SwipeGesture::setMinimumFingerCount(uint count)
-{
-    m_minimumFingerCount = count;
-    m_minimumFingerCountRelevant = true;
-}
-
-bool SwipeGesture::minimumFingerCountIsRelevant() const
-{
-    return m_minimumFingerCountRelevant;
-}
-
-void SwipeGesture::setMaximumFingerCount(uint count)
-{
-    m_maximumFingerCount = count;
-    m_maximumFingerCountRelevant = true;
-}
-
-uint SwipeGesture::maximumFingerCount() const
-{
-    return m_maximumFingerCount;
+    return m_fingerCount;
 }
 
 SwipeDirection SwipeGesture::direction() const
@@ -430,116 +348,9 @@ void SwipeGesture::setDirection(SwipeDirection direction)
     m_direction = direction;
 }
 
-void SwipeGesture::setMinimumX(int x)
+uint32_t PinchGesture::fingerCount() const
 {
-    m_minimumX = x;
-    m_minimumXRelevant = true;
-}
-
-int SwipeGesture::minimumX() const
-{
-    return m_minimumX;
-}
-
-bool SwipeGesture::minimumXIsRelevant() const
-{
-    return m_minimumXRelevant;
-}
-
-void SwipeGesture::setMinimumY(int y)
-{
-    m_minimumY = y;
-    m_minimumYRelevant = true;
-}
-
-int SwipeGesture::minimumY() const
-{
-    return m_minimumY;
-}
-
-bool SwipeGesture::minimumYIsRelevant() const
-{
-    return m_minimumYRelevant;
-}
-
-void SwipeGesture::setMaximumX(int x)
-{
-    m_maximumX = x;
-    m_maximumXRelevant = true;
-}
-
-int SwipeGesture::maximumX() const
-{
-    return m_maximumX;
-}
-
-bool SwipeGesture::maximumXIsRelevant() const
-{
-    return m_maximumXRelevant;
-}
-
-void SwipeGesture::setMaximumY(int y)
-{
-    m_maximumY = y;
-    m_maximumYRelevant = true;
-}
-
-int SwipeGesture::maximumY() const
-{
-    return m_maximumY;
-}
-
-bool SwipeGesture::maximumYIsRelevant() const
-{
-    return m_maximumYRelevant;
-}
-
-QPointF SwipeGesture::minimumDelta() const
-{
-    return m_minimumDelta;
-}
-
-void SwipeGesture::setMinimumDelta(const QPointF &delta)
-{
-    m_minimumDelta = delta;
-    m_minimumDeltaRelevant = true;
-}
-
-bool SwipeGesture::isMinimumDeltaRelevant() const
-{
-    return m_minimumDeltaRelevant;
-}
-
-bool PinchGesture::minimumFingerCountIsRelevant() const
-{
-    return m_minimumFingerCountRelevant;
-}
-
-void PinchGesture::setMinimumFingerCount(uint count)
-{
-    m_minimumFingerCount = count;
-    m_minimumFingerCountRelevant = true;
-}
-
-uint PinchGesture::minimumFingerCount() const
-{
-    return m_minimumFingerCount;
-}
-
-bool PinchGesture::maximumFingerCountIsRelevant() const
-{
-    return m_maximumFingerCountRelevant;
-}
-
-void PinchGesture::setMaximumFingerCount(uint count)
-{
-    m_maximumFingerCount = count;
-    m_maximumFingerCountRelevant = true;
-}
-
-uint PinchGesture::maximumFingerCount() const
-{
-    return m_maximumFingerCount;
+    return m_fingerCount;
 }
 
 PinchDirection PinchGesture::direction() const
@@ -552,30 +363,9 @@ void PinchGesture::setDirection(PinchDirection direction)
     m_direction = direction;
 }
 
-qreal PinchGesture::minimumScaleDelta() const
-{
-    return m_minimumScaleDelta;
-}
-
-void PinchGesture::setMinimumScaleDelta(const qreal &scaleDelta)
-{
-    m_minimumScaleDelta = scaleDelta;
-    m_minimumScaleDeltaRelevant = true;
-}
-
-bool PinchGesture::isMinimumScaleDeltaRelevant() const
-{
-    return m_minimumScaleDeltaRelevant;
-}
-
 int GestureRecognizer::startSwipeGesture(uint fingerCount)
 {
-    return startSwipeGesture(fingerCount, QPointF(), StartPositionBehavior::Irrelevant);
-}
-
-int GestureRecognizer::startSwipeGesture(const QPointF &startPos)
-{
-    return startSwipeGesture(1, startPos, StartPositionBehavior::Relevant);
+    return startSwipeGesture(fingerCount, QPointF());
 }
 
 }

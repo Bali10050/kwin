@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "utils/damagejournal.h"
 #include "wayland/screencast_v1.h"
 
 #include <QHash>
@@ -27,7 +28,6 @@ namespace KWin
 {
 
 class Cursor;
-class GLTexture;
 class PipeWireCore;
 class ScreenCastBuffer;
 class ScreenCastSource;
@@ -39,6 +39,7 @@ struct ScreenCastDmaBufTextureParams
     int height = 0;
     uint32_t format = 0;
     uint64_t modifier = 0;
+    bool supportsSyncObj = false;
 };
 
 class KWIN_EXPORT ScreenCastStream : public QObject
@@ -66,7 +67,7 @@ public:
 
     void close();
 
-    void scheduleRecord(const QRegion &damage, Contents contents = Content::Video);
+    void scheduleRecord(Contents contents = Content::Video);
 
     void setCursorMode(ScreencastV1Interface::CursorMode mode);
 
@@ -89,7 +90,6 @@ private:
     void resize(const QSize &resolution);
     void coreFailed(const QString &errorMessage);
     void addCursorMetadata(spa_buffer *spaBuffer, Cursor *cursor);
-    QRegion addCursorEmbedded(ScreenCastBuffer *buffer, Cursor *cursor);
     void addHeader(spa_buffer *spaBuffer);
     void corruptHeader(spa_buffer *spaBuffer);
     void addDamage(spa_buffer *spaBuffer, const QRegion &damagedRegion);
@@ -98,7 +98,8 @@ private:
                          struct spa_fraction *defaultFramerate, struct spa_fraction *minFramerate, struct spa_fraction *maxFramerate,
                          const QList<uint64_t> &modifiers, quint32 modifiersFlags);
     pw_buffer *dequeueBuffer();
-    void record(const QRegion &damage, Contents contents);
+    void record(Contents contents);
+    void bumpBufferAge(ScreenCastBuffer *renderedBuffer);
 
     std::optional<ScreenCastDmaBufTextureParams> testCreateDmaBuf(const QSize &size, quint32 format, const QList<uint64_t> &modifiers);
 
@@ -122,8 +123,6 @@ private:
     {
         ScreencastV1Interface::CursorMode mode = ScreencastV1Interface::Hidden;
         const QSize bitmapSize = QSize(256, 256);
-        QRectF lastRect;
-        std::unique_ptr<GLTexture> texture;
         bool visible = false;
         bool invalid = true;
         QMetaObject::Connection changedConnection = QMetaObject::Connection();
@@ -135,10 +134,12 @@ private:
     quint32 m_drmFormat = 0;
 
     std::optional<std::chrono::steady_clock::time_point> m_lastSent;
-    QRegion m_pendingDamage;
     QTimer m_pendingFrame;
     Contents m_pendingContents = Content::None;
     QList<pw_buffer *> m_dequeuedBuffers;
+
+    QList<ScreenCastBuffer *> m_allBuffers;
+    DamageJournal m_damageJournal;
 };
 
 } // namespace KWin

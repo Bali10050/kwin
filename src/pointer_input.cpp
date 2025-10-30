@@ -26,6 +26,7 @@
 #include "wayland/display.h"
 #include "wayland/pointer.h"
 #include "wayland/pointerconstraints_v1.h"
+#include "wayland/pointerwarp_v1.h"
 #include "wayland/seat.h"
 #include "wayland/surface.h"
 #include "wayland_server.h"
@@ -147,6 +148,20 @@ void PointerInputRedirection::init()
         warp(output->geometry().center());
     }
     updateAfterScreenChange();
+
+    connect(waylandServer()->pointerWarp(), &PointerWarpV1::warpRequested, this, [](SurfaceInterface *surface, PointerInterface *pointer, const QPointF &point, uint32_t serial) {
+        if (serial != waylandServer()->seat()->pointer()->focusedSerial()) {
+            return;
+        }
+        if (!surface->boundingRect().contains(point)) {
+            return;
+        }
+        Window *window = waylandServer()->findWindow(surface->mainSurface());
+        if (!window) {
+            return;
+        }
+        input()->pointer()->warp(window->mapFromLocal(surface->mapToMainSurface(point)));
+    });
 }
 
 void PointerInputRedirection::updateOnStartMoveResize()
@@ -264,8 +279,8 @@ void PointerInputRedirection::processMotionInternal(const QPointF &pos, const QP
     };
 
     update();
-    input()->processSpies(std::bind(&InputEventSpy::pointerMotion, std::placeholders::_1, &event));
-    input()->processFilters(std::bind(&InputEventFilter::pointerMotion, std::placeholders::_1, &event));
+    input()->processSpies(&InputEventSpy::pointerMotion, &event);
+    input()->processFilters(&InputEventFilter::pointerMotion, &event);
 }
 
 void PointerInputRedirection::processButton(uint32_t button, PointerButtonState state, std::chrono::microseconds time, InputDevice *device)
@@ -293,8 +308,14 @@ void PointerInputRedirection::processButton(uint32_t button, PointerButtonState 
         .timestamp = time,
     };
 
-    input()->processSpies(std::bind(&InputEventSpy::pointerButton, std::placeholders::_1, &event));
-    input()->processFilters(std::bind(&InputEventFilter::pointerButton, std::placeholders::_1, &event));
+    input()->processSpies(&InputEventSpy::pointerButton, &event);
+    input()->processFilters(&InputEventFilter::pointerButton, &event);
+    if (state == PointerButtonState::Pressed) {
+        input()->setLastInteractionSerial(waylandServer()->seat()->display()->serial());
+        if (auto f = focus()) {
+            f->setLastUsageSerial(waylandServer()->seat()->display()->serial());
+        }
+    }
 
     if (state == PointerButtonState::Released) {
         update();
@@ -327,8 +348,8 @@ void PointerInputRedirection::processAxis(PointerAxis axis, qreal delta, qint32 
         .timestamp = time,
     };
 
-    input()->processSpies(std::bind(&InputEventSpy::pointerAxis, std::placeholders::_1, &event));
-    input()->processFilters(std::bind(&InputEventFilter::pointerAxis, std::placeholders::_1, &event));
+    input()->processSpies(&InputEventSpy::pointerAxis, &event);
+    input()->processFilters(&InputEventFilter::pointerAxis, &event);
 }
 
 void PointerInputRedirection::processSwipeGestureBegin(int fingerCount, std::chrono::microseconds time, KWin::InputDevice *device)
@@ -337,9 +358,15 @@ void PointerInputRedirection::processSwipeGestureBegin(int fingerCount, std::chr
     if (!inited()) {
         return;
     }
+    update();
 
-    input()->processSpies(std::bind(&InputEventSpy::swipeGestureBegin, std::placeholders::_1, fingerCount, time));
-    input()->processFilters(std::bind(&InputEventFilter::swipeGestureBegin, std::placeholders::_1, fingerCount, time));
+    PointerSwipeGestureBeginEvent event{
+        .fingerCount = fingerCount,
+        .time = time,
+    };
+
+    input()->processSpies(&InputEventSpy::swipeGestureBegin, &event);
+    input()->processFilters(&InputEventFilter::swipeGestureBegin, &event);
 }
 
 void PointerInputRedirection::processSwipeGestureUpdate(const QPointF &delta, std::chrono::microseconds time, KWin::InputDevice *device)
@@ -350,8 +377,13 @@ void PointerInputRedirection::processSwipeGestureUpdate(const QPointF &delta, st
     }
     update();
 
-    input()->processSpies(std::bind(&InputEventSpy::swipeGestureUpdate, std::placeholders::_1, delta, time));
-    input()->processFilters(std::bind(&InputEventFilter::swipeGestureUpdate, std::placeholders::_1, delta, time));
+    PointerSwipeGestureUpdateEvent event{
+        .delta = delta,
+        .time = time,
+    };
+
+    input()->processSpies(&InputEventSpy::swipeGestureUpdate, &event);
+    input()->processFilters(&InputEventFilter::swipeGestureUpdate, &event);
 }
 
 void PointerInputRedirection::processSwipeGestureEnd(std::chrono::microseconds time, KWin::InputDevice *device)
@@ -362,8 +394,12 @@ void PointerInputRedirection::processSwipeGestureEnd(std::chrono::microseconds t
     }
     update();
 
-    input()->processSpies(std::bind(&InputEventSpy::swipeGestureEnd, std::placeholders::_1, time));
-    input()->processFilters(std::bind(&InputEventFilter::swipeGestureEnd, std::placeholders::_1, time));
+    PointerSwipeGestureEndEvent event{
+        .time = time,
+    };
+
+    input()->processSpies(&InputEventSpy::swipeGestureEnd, &event);
+    input()->processFilters(&InputEventFilter::swipeGestureEnd, &event);
 }
 
 void PointerInputRedirection::processSwipeGestureCancelled(std::chrono::microseconds time, KWin::InputDevice *device)
@@ -374,8 +410,12 @@ void PointerInputRedirection::processSwipeGestureCancelled(std::chrono::microsec
     }
     update();
 
-    input()->processSpies(std::bind(&InputEventSpy::swipeGestureCancelled, std::placeholders::_1, time));
-    input()->processFilters(std::bind(&InputEventFilter::swipeGestureCancelled, std::placeholders::_1, time));
+    PointerSwipeGestureCancelEvent event{
+        .time = time,
+    };
+
+    input()->processSpies(&InputEventSpy::swipeGestureCancelled, &event);
+    input()->processFilters(&InputEventFilter::swipeGestureCancelled, &event);
 }
 
 void PointerInputRedirection::processPinchGestureBegin(int fingerCount, std::chrono::microseconds time, KWin::InputDevice *device)
@@ -386,8 +426,13 @@ void PointerInputRedirection::processPinchGestureBegin(int fingerCount, std::chr
     }
     update();
 
-    input()->processSpies(std::bind(&InputEventSpy::pinchGestureBegin, std::placeholders::_1, fingerCount, time));
-    input()->processFilters(std::bind(&InputEventFilter::pinchGestureBegin, std::placeholders::_1, fingerCount, time));
+    PointerPinchGestureBeginEvent event{
+        .fingerCount = fingerCount,
+        .time = time,
+    };
+
+    input()->processSpies(&InputEventSpy::pinchGestureBegin, &event);
+    input()->processFilters(&InputEventFilter::pinchGestureBegin, &event);
 }
 
 void PointerInputRedirection::processPinchGestureUpdate(qreal scale, qreal angleDelta, const QPointF &delta, std::chrono::microseconds time, KWin::InputDevice *device)
@@ -398,8 +443,15 @@ void PointerInputRedirection::processPinchGestureUpdate(qreal scale, qreal angle
     }
     update();
 
-    input()->processSpies(std::bind(&InputEventSpy::pinchGestureUpdate, std::placeholders::_1, scale, angleDelta, delta, time));
-    input()->processFilters(std::bind(&InputEventFilter::pinchGestureUpdate, std::placeholders::_1, scale, angleDelta, delta, time));
+    PointerPinchGestureUpdateEvent event{
+        .scale = scale,
+        .angleDelta = angleDelta,
+        .delta = delta,
+        .time = time,
+    };
+
+    input()->processSpies(&InputEventSpy::pinchGestureUpdate, &event);
+    input()->processFilters(&InputEventFilter::pinchGestureUpdate, &event);
 }
 
 void PointerInputRedirection::processPinchGestureEnd(std::chrono::microseconds time, KWin::InputDevice *device)
@@ -410,8 +462,12 @@ void PointerInputRedirection::processPinchGestureEnd(std::chrono::microseconds t
     }
     update();
 
-    input()->processSpies(std::bind(&InputEventSpy::pinchGestureEnd, std::placeholders::_1, time));
-    input()->processFilters(std::bind(&InputEventFilter::pinchGestureEnd, std::placeholders::_1, time));
+    PointerPinchGestureEndEvent event{
+        .time = time,
+    };
+
+    input()->processSpies(&InputEventSpy::pinchGestureEnd, &event);
+    input()->processFilters(&InputEventFilter::pinchGestureEnd, &event);
 }
 
 void PointerInputRedirection::processPinchGestureCancelled(std::chrono::microseconds time, KWin::InputDevice *device)
@@ -422,8 +478,12 @@ void PointerInputRedirection::processPinchGestureCancelled(std::chrono::microsec
     }
     update();
 
-    input()->processSpies(std::bind(&InputEventSpy::pinchGestureCancelled, std::placeholders::_1, time));
-    input()->processFilters(std::bind(&InputEventFilter::pinchGestureCancelled, std::placeholders::_1, time));
+    PointerPinchGestureCancelEvent event{
+        .time = time,
+    };
+
+    input()->processSpies(&InputEventSpy::pinchGestureCancelled, &event);
+    input()->processFilters(&InputEventFilter::pinchGestureCancelled, &event);
 }
 
 void PointerInputRedirection::processHoldGestureBegin(int fingerCount, std::chrono::microseconds time, KWin::InputDevice *device)
@@ -433,8 +493,13 @@ void PointerInputRedirection::processHoldGestureBegin(int fingerCount, std::chro
     }
     update();
 
-    input()->processSpies(std::bind(&InputEventSpy::holdGestureBegin, std::placeholders::_1, fingerCount, time));
-    input()->processFilters(std::bind(&InputEventFilter::holdGestureBegin, std::placeholders::_1, fingerCount, time));
+    PointerHoldGestureBeginEvent event{
+        .fingerCount = fingerCount,
+        .time = time,
+    };
+
+    input()->processSpies(&InputEventSpy::holdGestureBegin, &event);
+    input()->processFilters(&InputEventFilter::holdGestureBegin, &event);
 }
 
 void PointerInputRedirection::processHoldGestureEnd(std::chrono::microseconds time, KWin::InputDevice *device)
@@ -444,8 +509,12 @@ void PointerInputRedirection::processHoldGestureEnd(std::chrono::microseconds ti
     }
     update();
 
-    input()->processSpies(std::bind(&InputEventSpy::holdGestureEnd, std::placeholders::_1, time));
-    input()->processFilters(std::bind(&InputEventFilter::holdGestureEnd, std::placeholders::_1, time));
+    PointerHoldGestureEndEvent event{
+        .time = time,
+    };
+
+    input()->processSpies(&InputEventSpy::holdGestureEnd, &event);
+    input()->processFilters(&InputEventFilter::holdGestureEnd, &event);
 }
 
 void PointerInputRedirection::processHoldGestureCancelled(std::chrono::microseconds time, KWin::InputDevice *device)
@@ -455,8 +524,12 @@ void PointerInputRedirection::processHoldGestureCancelled(std::chrono::microseco
     }
     update();
 
-    input()->processSpies(std::bind(&InputEventSpy::holdGestureCancelled, std::placeholders::_1, time));
-    input()->processFilters(std::bind(&InputEventFilter::holdGestureCancelled, std::placeholders::_1, time));
+    PointerHoldGestureCancelEvent event{
+        .time = time,
+    };
+
+    input()->processSpies(&InputEventSpy::holdGestureCancelled, &event);
+    input()->processFilters(&InputEventFilter::holdGestureCancelled, &event);
 }
 
 void PointerInputRedirection::processFrame(KWin::InputDevice *device)
@@ -465,7 +538,7 @@ void PointerInputRedirection::processFrame(KWin::InputDevice *device)
         return;
     }
 
-    input()->processFilters(std::bind(&InputEventFilter::pointerFrame, std::placeholders::_1));
+    input()->processFilters(&InputEventFilter::pointerFrame);
 }
 
 bool PointerInputRedirection::areButtonsPressed() const

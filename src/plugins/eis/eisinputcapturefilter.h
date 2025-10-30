@@ -30,25 +30,25 @@ public:
 
     bool keyboardKey(KeyboardKeyEvent *event) override;
 
-    bool touchDown(qint32 id, const QPointF &pos, std::chrono::microseconds time) override;
-    bool touchMotion(qint32 id, const QPointF &pos, std::chrono::microseconds time) override;
-    bool touchUp(qint32 id, std::chrono::microseconds time) override;
+    bool touchDown(TouchDownEvent *event) override;
+    bool touchMotion(TouchMotionEvent *event) override;
+    bool touchUp(TouchUpEvent *event) override;
     bool touchCancel() override;
     bool touchFrame() override;
 
-    bool pinchGestureBegin(int fingerCount, std::chrono::microseconds time) override;
-    bool pinchGestureUpdate(qreal scale, qreal angleDelta, const QPointF &delta, std::chrono::microseconds time) override;
-    bool pinchGestureEnd(std::chrono::microseconds time) override;
-    bool pinchGestureCancelled(std::chrono::microseconds time) override;
+    bool pinchGestureBegin(PointerPinchGestureBeginEvent *event) override;
+    bool pinchGestureUpdate(PointerPinchGestureUpdateEvent *event) override;
+    bool pinchGestureEnd(PointerPinchGestureEndEvent *event) override;
+    bool pinchGestureCancelled(PointerPinchGestureCancelEvent *event) override;
 
-    bool swipeGestureBegin(int fingerCount, std::chrono::microseconds time) override;
-    bool swipeGestureUpdate(const QPointF &delta, std::chrono::microseconds time) override;
-    bool swipeGestureEnd(std::chrono::microseconds time) override;
-    bool swipeGestureCancelled(std::chrono::microseconds time) override;
+    bool swipeGestureBegin(PointerSwipeGestureBeginEvent *event) override;
+    bool swipeGestureUpdate(PointerSwipeGestureUpdateEvent *event) override;
+    bool swipeGestureEnd(PointerSwipeGestureEndEvent *event) override;
+    bool swipeGestureCancelled(PointerSwipeGestureCancelEvent *event) override;
 
-    bool holdGestureBegin(int fingerCount, std::chrono::microseconds time) override;
-    bool holdGestureEnd(std::chrono::microseconds time) override;
-    bool holdGestureCancelled(std::chrono::microseconds time) override;
+    bool holdGestureBegin(PointerHoldGestureBeginEvent *event) override;
+    bool holdGestureEnd(PointerHoldGestureEndEvent *event) override;
+    bool holdGestureCancelled(PointerHoldGestureCancelEvent *event) override;
 
 private:
     EisInputCaptureManager *m_manager;

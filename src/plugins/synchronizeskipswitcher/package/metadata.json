@@ -48,7 +48,6 @@
                 "Name[tr]": "Martin Gräßlin",
                 "Name[uk]": "Martin Gräßlin",
                 "Name[vi]": "Martin Gräßlin",
-                "Name[x-test]": "xxMartin Gräßlinxx",
                 "Name[zh_CN]": "Martin Gräßlin",
                 "Name[zh_TW]": "Martin Gräßlin"
             }
@@ -73,7 +72,7 @@
         "Description[he]": "הסתרת כל החלונות שמסומנים לדילוג על סרגל המשימות ממחליפי החלונות (למשל: Alt+Tab)",
         "Description[hu]": "Elrejti az összes olyan ablakot az ablakváltókból (például Alt+Tab) is, amely kimarad a feladatlistából",
         "Description[ia]": "Cela omne fenestras marcate como barra de cargas de salto pro anque esser excludite ex commutatores de fenestra (p.ex.Alt+Tab)",
-        "Description[is]": "Felur alla glugga sem merktir eru með Sleppt í verkstiku þannig að þeir birtist ekki í gluggaskiptum (t.d. Alt+Tab)",
+        "Description[is]": "Felur alla glugga sem merktir eru sem Sleppa í verkstiku, þannig að þeir birtist ekki í gluggaskiptum (þ.e. Alt+Tab)",
         "Description[it]": "Nasconde tutte le finestre marcate come Salta barra delle applicazioni che sono escluse anche dal selettore delle finestre (es. Alt+Tab)",
         "Description[ja]": "「タスクバーをスキップ」が設定されたすべてのウィンドウをウィンドウスイッチャー (例: Alt+Tab) からも除外します",
         "Description[ka]": "Skip Taskbar-ით მონიშნული ყველა ფანჯრის Alt+Tab-დან და სხვა გადამრთველებისგან დამალვა",
@@ -96,7 +95,6 @@
         "Description[tr]": "Görev Çubuğunu Atla olarak imlenen tüm pencerelerin, değiştiricilerden de (örn. Seçenek+Sekme) dışlanmasını sağlar",
         "Description[uk]": "Приховує всі вікна, позначені як такі, що не показуються на панелі задач, так, щоб їх не було показано у списках перемикання вікон (наприклад Alt+Tab)",
         "Description[vi]": "Ẩn tất cả các cửa sổ được đánh dấu là \"Bỏ qua thanh tác vụ\" khỏi các trình chuyển cửa sổ (vd.: Alt+Tab)",
-        "Description[x-test]": "xxHides all windows marked as Skip Taskbar to be also excluded from window switchers (e.g. Alt+Tab)xx",
         "Description[zh_CN]": "窗口切换器 (Alt+Tab) 将不会显示标记为跳过任务栏的窗口",
         "Description[zh_TW]": "隱藏所有標記為忽略工作列的視窗，讓它們也從視窗切換器（如 Alt+Tab）中排除",
         "Icon": "preferences-system-windows-script-synchronizeskipswitcher",
@@ -122,7 +120,7 @@
         "Name[he]": "סנכרון דילוג על מחליף חלונות עם סרגל החלונות",
         "Name[hu]": "Mellőző szinkronizálása a Feladatsávval",
         "Name[ia]": "Synchronisa Commutator de salto con Barra de carga",
-        "Name[is]": "Samstilla Sleppt í gluggaskiptum við verkstiku",
+        "Name[is]": "Samstilla Sleppa í gluggaskiptum við verkstiku",
         "Name[it]": "Sincronizza selettore di salto con la barra delle applicazioni",
         "Name[ja]": "スイッチャーもスキップ",
         "Name[ka]": "Skip Swtcher-ის სინქრონიზაცია მონაცემების ზოლთან",
@@ -145,7 +143,6 @@
         "Name[tr]": "Değiştiricide Gösterilmeyenleri Çubukta da Gösterme",
         "Name[uk]": "Синхронізувати виключення вікон у перемикачі з панеллю задач",
         "Name[vi]": "Đồng bộ hoá việc bỏ qua trình chuyển với thanh tác vụ",
-        "Name[x-test]": "xxSynchronize Skip Switcher with Taskbarxx",
         "Name[zh_CN]": "窗口切换器与任务栏同步跳过窗口设置",
         "Name[zh_TW]": "同步忽略切換器標記與忽略工作列標記"
     },

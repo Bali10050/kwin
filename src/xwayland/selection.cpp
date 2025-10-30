@@ -10,12 +10,14 @@
 #include "databridge.h"
 #include "selection_source.h"
 #include "transfer.h"
+#include "xwayland_logging.h"
 
 #include "atoms.h"
 #include "utils/xcbutils.h"
 #include "workspace.h"
 #include "x11window.h"
 
+#include <unistd.h>
 #include <xcb/xcb_event.h>
 #include <xcb/xfixes.h>
 
@@ -25,48 +27,6 @@ namespace KWin
 {
 namespace Xwl
 {
-
-xcb_atom_t Selection::mimeTypeToAtom(const QString &mimeType)
-{
-    if (mimeType == QLatin1String("text/plain;charset=utf-8")) {
-        return atoms->utf8_string;
-    }
-    if (mimeType == QLatin1String("text/plain")) {
-        return atoms->text;
-    }
-    if (mimeType == QLatin1String("text/x-uri")) {
-        return atoms->uri_list;
-    }
-    return mimeTypeToAtomLiteral(mimeType);
-}
-
-xcb_atom_t Selection::mimeTypeToAtomLiteral(const QString &mimeType)
-{
-    return Xcb::Atom(mimeType.toLatin1(), false, kwinApp()->x11Connection());
-}
-
-QStringList Selection::atomToMimeTypes(xcb_atom_t atom)
-{
-    QStringList mimeTypes;
-
-    if (atom == atoms->utf8_string) {
-        mimeTypes << QStringLiteral("text/plain;charset=utf-8");
-    } else if (atom == atoms->text) {
-        mimeTypes << QStringLiteral("text/plain");
-    } else if (atom == atoms->uri_list) {
-        mimeTypes << QStringLiteral("text/uri-list")
-                  << QStringLiteral("text/x-uri");
-    } else if (atom == atoms->targets || atom == atoms->timestamp) {
-        // Ignore known ICCCM internal atoms
-    } else {
-        const QString atomNameName = Xcb::atomName(atom);
-        // Ignore other non-mimetype atoms
-        if (atomNameName.contains(QLatin1Char('/'))) {
-            mimeTypes << atomNameName;
-        }
-    }
-    return mimeTypes;
-}
 
 Selection::Selection(xcb_atom_t atom, QObject *parent)
     : QObject(parent)
@@ -86,6 +46,11 @@ bool Selection::handleXfixesNotify(xcb_xfixes_selection_notify_event_t *event)
     if (event->selection != m_atom) {
         return false;
     }
+
+    m_owner = event->owner;
+
+    // TODO: Since we track the selection owner window, m_disownPending should be unnecessary now.
+    // If event->owner is None and m_owner != m_window, it means selection got unset by a real client.
     if (m_disownPending) {
         // notify of our own disown - ignore it
         m_disownPending = false;
@@ -159,30 +124,30 @@ void Selection::registerXfixes()
 
 void Selection::setWlSource(WlSource *source)
 {
-    if (m_waylandSource) {
-        m_waylandSource->deleteLater();
-        m_waylandSource = nullptr;
+    if (!source) {
+        m_waylandSource.reset();
+        return;
     }
-    delete m_xSource;
-    m_xSource = nullptr;
-    if (source) {
-        m_waylandSource = source;
-        connect(source, &WlSource::transferReady, this, &Selection::startTransferToX);
-    }
+
+    m_xSource.reset();
+
+    m_waylandSource.reset(source);
+    connect(m_waylandSource.get(), &WlSource::transferReady, this, &Selection::startTransferToX);
 }
 
 void Selection::createX11Source(xcb_xfixes_selection_notify_event_t *event)
 {
     if (!event || event->owner == XCB_WINDOW_NONE) {
         x11OfferLost();
-        setWlSource(nullptr);
+        m_xSource.reset();
         return;
     }
-    setWlSource(nullptr);
 
-    m_xSource = new X11Source(this, event);
-    connect(m_xSource, &X11Source::offersChanged, this, &Selection::x11OffersChanged);
-    connect(m_xSource, &X11Source::transferReady, this, &Selection::startTransferToWayland);
+    m_waylandSource.reset();
+
+    m_xSource = std::make_unique<X11Source>(this, event);
+    connect(m_xSource.get(), &X11Source::targetsReceived, this, &Selection::x11TargetsReceived);
+    connect(m_xSource.get(), &X11Source::transferRequested, this, &Selection::startTransferToWayland);
 }
 
 void Selection::ownSelection(bool own)
@@ -194,11 +159,13 @@ void Selection::ownSelection(bool own)
                                 m_atom,
                                 XCB_TIME_CURRENT_TIME);
     } else {
-        m_disownPending = true;
-        xcb_set_selection_owner(xcbConn,
-                                XCB_WINDOW_NONE,
-                                m_atom,
-                                m_timestamp);
+        if (m_owner == m_window) {
+            m_disownPending = true;
+            xcb_set_selection_owner(xcbConn,
+                                    XCB_WINDOW_NONE,
+                                    m_atom,
+                                    m_timestamp);
+        }
     }
     xcb_flush(xcbConn);
 }
@@ -267,14 +234,19 @@ bool Selection::handlePropertyNotify(xcb_property_notify_event_t *event)
     return false;
 }
 
-void Selection::startTransferToWayland(xcb_atom_t target, qint32 fd)
+void Selection::startTransferToWayland(const QString &mimeType, qint32 fd)
 {
-    // create new x to wl data transfer object
-    auto *transfer = new TransferXtoWl(m_atom, target, fd, m_xSource->timestamp(), m_requestorWindow, this);
+    const xcb_atom_t mimeAtom = Xcb::mimeTypeToAtom(mimeType);
+    if (mimeAtom == XCB_ATOM_NONE) {
+        qCDebug(KWIN_XWL) << "Sending X11 clipboard to Wayland failed: unsupported MIME.";
+        close(fd);
+        return;
+    }
+
+    auto *transfer = new TransferXtoWl(m_atom, mimeAtom, fd, m_xSource->timestamp(), m_requestorWindow, this);
     m_xToWlTransfers << transfer;
 
     connect(transfer, &TransferXtoWl::finished, this, [this, transfer]() {
-        Q_EMIT transferFinished(transfer->timestamp());
         transfer->deleteLater();
         m_xToWlTransfers.removeOne(transfer);
         endTimeoutTransfersTimer();
@@ -289,8 +261,6 @@ void Selection::startTransferToX(xcb_selection_request_event_t *event, qint32 fd
 
     connect(transfer, &TransferWltoX::selectionNotify, this, &Selection::sendSelectionNotify);
     connect(transfer, &TransferWltoX::finished, this, [this, transfer]() {
-        Q_EMIT transferFinished(transfer->timestamp());
-
         // TODO: serialize? see comment below.
         //        const bool wasActive = (transfer == m_wlToXTransfers[0]);
         transfer->deleteLater();

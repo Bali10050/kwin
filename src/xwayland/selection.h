@@ -31,7 +31,7 @@ class X11Source;
  * Wayland counter-parts.
  *
  * The class needs to be subclassed and adjusted according to the
- * selection, but provides common fucntionality to be expected of all
+ * selection, but provides common functionality to be expected of all
  * selections.
  *
  * A selection should exist through the whole runtime of an Xwayland
@@ -46,9 +46,6 @@ class Selection : public QObject
     Q_OBJECT
 
 public:
-    static xcb_atom_t mimeTypeToAtom(const QString &mimeType);
-    static xcb_atom_t mimeTypeToAtomLiteral(const QString &mimeType);
-    static QStringList atomToMimeTypes(xcb_atom_t atom);
     static void sendSelectionNotify(xcb_selection_request_event_t *event, bool success);
 
     // on selection owner changes by X clients (Xwl -> Wl)
@@ -65,16 +62,13 @@ public:
     }
     void overwriteRequestorWindow(xcb_window_t window);
 
-Q_SIGNALS:
-    void transferFinished(xcb_timestamp_t eventTime);
-
 protected:
     Selection(xcb_atom_t atom, QObject *parent);
     void registerXfixes();
 
     virtual void doHandleXfixesNotify(xcb_xfixes_selection_notify_event_t *event) = 0;
     virtual void x11OfferLost() = 0;
-    virtual void x11OffersChanged(const QStringList &added, const QStringList &removed) = 0;
+    virtual void x11TargetsReceived(const QStringList &mimeTypes) = 0;
 
     virtual bool handleClientMessage(xcb_client_message_event_t *event)
     {
@@ -84,12 +78,12 @@ protected:
     void setWlSource(WlSource *source);
     WlSource *wlSource() const
     {
-        return m_waylandSource;
+        return m_waylandSource.get();
     }
     void createX11Source(xcb_xfixes_selection_notify_event_t *event);
     X11Source *x11Source() const
     {
-        return m_xSource;
+        return m_xSource.get();
     }
     // must be called in order to provide data from Wl to X
     void ownSelection(bool own);
@@ -103,7 +97,7 @@ private:
     bool handleSelectionNotify(xcb_selection_notify_event_t *event);
     bool handlePropertyNotify(xcb_property_notify_event_t *event);
 
-    void startTransferToWayland(xcb_atom_t target, qint32 fd);
+    void startTransferToWayland(const QString &mimeType, qint32 fd);
     void startTransferToX(xcb_selection_request_event_t *event, qint32 fd);
 
     // Timeout transfers, which have become inactive due to client errors.
@@ -112,14 +106,15 @@ private:
     void endTimeoutTransfersTimer();
 
     xcb_atom_t m_atom = XCB_ATOM_NONE;
+    xcb_window_t m_owner = XCB_WINDOW_NONE;
     xcb_window_t m_window = XCB_WINDOW_NONE;
     xcb_window_t m_requestorWindow = XCB_WINDOW_NONE;
     xcb_timestamp_t m_timestamp;
 
     // Active source, if any. Only one of them at max can exist
     // at the same time.
-    WlSource *m_waylandSource = nullptr;
-    X11Source *m_xSource = nullptr;
+    std::unique_ptr<WlSource> m_waylandSource;
+    std::unique_ptr<X11Source> m_xSource;
 
     // active transfers
     QList<TransferWltoX *> m_wlToXTransfers;

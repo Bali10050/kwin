@@ -81,30 +81,6 @@ QString DBusInterface::activeOutputName()
     return Workspace::self()->activeOutput()->name();
 }
 
-bool DBusInterface::startActivity(const QString &in0)
-{
-#if KWIN_BUILD_ACTIVITIES
-    if (!Workspace::self()->activities()) {
-        return false;
-    }
-    return Workspace::self()->activities()->start(in0);
-#else
-    return false;
-#endif
-}
-
-bool DBusInterface::stopActivity(const QString &in0)
-{
-#if KWIN_BUILD_ACTIVITIES
-    if (!Workspace::self()->activities()) {
-        return false;
-    }
-    return Workspace::self()->activities()->stop(in0);
-#else
-    return false;
-#endif
-}
-
 int DBusInterface::currentDesktop()
 {
     return VirtualDesktopManager::self()->current();
@@ -156,7 +132,6 @@ QVariantMap clientToVariantMap(const Window *c)
             {QStringLiteral("height"), c->height()},
             {QStringLiteral("desktops"), c->desktopIds()},
             {QStringLiteral("minimized"), c->isMinimized()},
-            {QStringLiteral("shaded"), c->isShade()},
             {QStringLiteral("fullscreen"), c->isFullScreen()},
             {QStringLiteral("keepAbove"), c->keepAbove()},
             {QStringLiteral("keepBelow"), c->keepBelow()},

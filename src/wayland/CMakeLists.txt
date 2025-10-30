@@ -38,6 +38,7 @@ ecm_add_qtwayland_server_protocol_kde(WaylandProtocols_xml
         ${PROJECT_SOURCE_DIR}/src/wayland/protocols/drm.xml
         ${PROJECT_SOURCE_DIR}/src/wayland/protocols/frog-color-management-v1.xml
         ${PROJECT_SOURCE_DIR}/src/wayland/protocols/wlr-layer-shell-unstable-v1.xml
+        ${PROJECT_SOURCE_DIR}/src/wayland/protocols/xx-pip-v1.xml
         ${PROJECT_SOURCE_DIR}/src/wayland/protocols/xx-session-management-v1.xml
 
         ${WaylandProtocols_DATADIR}/stable/presentation-time/presentation-time.xml
@@ -55,6 +56,7 @@ ecm_add_qtwayland_server_protocol_kde(WaylandProtocols_xml
         ${WaylandProtocols_DATADIR}/staging/fifo/fifo-v1.xml
         ${WaylandProtocols_DATADIR}/staging/fractional-scale/fractional-scale-v1.xml
         ${WaylandProtocols_DATADIR}/staging/linux-drm-syncobj/linux-drm-syncobj-v1.xml
+        ${WaylandProtocols_DATADIR}/staging/pointer-warp/pointer-warp-v1.xml
         ${WaylandProtocols_DATADIR}/staging/security-context/security-context-v1.xml
         ${WaylandProtocols_DATADIR}/staging/single-pixel-buffer/single-pixel-buffer-v1.xml
         ${WaylandProtocols_DATADIR}/staging/tearing-control/tearing-control-v1.xml
@@ -133,6 +135,7 @@ target_sources(kwin PRIVATE
     pointer.cpp
     pointerconstraints_v1.cpp
     pointergestures_v1.cpp
+    pointerwarp_v1.cpp
     presentationtime.cpp
     primaryselectiondevice_v1.cpp
     primaryselectiondevicemanager_v1.cpp
@@ -174,6 +177,7 @@ target_sources(kwin PRIVATE
     xdgtopleveltag_v1.cpp
     xwaylandkeyboardgrab_v1.cpp
     xwaylandshell_v1.cpp
+    xxpip_v1.cpp
 )
 
 install(FILES
@@ -222,6 +226,7 @@ install(FILES
     pointer.h
     pointerconstraints_v1.h
     pointergestures_v1.h
+    pointerwarp_v1.h
     presentationtime.h
     primaryselectiondevice_v1.h
     primaryselectiondevicemanager_v1.h
@@ -242,6 +247,7 @@ install(FILES
     surface.h
     tablet_v2.h
     tearingcontrol_v1.h
+    textinput.h
     textinput_v1.h
     textinput_v2.h
     textinput_v3.h
@@ -268,6 +274,7 @@ install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/qwayland-server-frog-color-management-v1.h
     ${CMAKE_CURRENT_BINARY_DIR}/qwayland-server-kde-external-brightness-v1.h
     ${CMAKE_CURRENT_BINARY_DIR}/qwayland-server-linux-drm-syncobj-v1.h
+    ${CMAKE_CURRENT_BINARY_DIR}/qwayland-server-pointer-warp-v1.h
     ${CMAKE_CURRENT_BINARY_DIR}/qwayland-server-presentation-time.h
     ${CMAKE_CURRENT_BINARY_DIR}/qwayland-server-single-pixel-buffer-v1.h
     ${CMAKE_CURRENT_BINARY_DIR}/qwayland-server-xdg-toplevel-tag-v1.h
@@ -279,6 +286,7 @@ install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/wayland-frog-color-management-v1-server-protocol.h
     ${CMAKE_CURRENT_BINARY_DIR}/wayland-kde-external-brightness-v1-server-protocol.h
     ${CMAKE_CURRENT_BINARY_DIR}/wayland-linux-drm-syncobj-v1-server-protocol.h
+    ${CMAKE_CURRENT_BINARY_DIR}/wayland-pointer-warp-v1-server-protocol.h
     ${CMAKE_CURRENT_BINARY_DIR}/wayland-presentation-time-server-protocol.h
     ${CMAKE_CURRENT_BINARY_DIR}/wayland-single-pixel-buffer-v1-server-protocol.h
     ${CMAKE_CURRENT_BINARY_DIR}/wayland-xdg-toplevel-tag-v1-server-protocol.h

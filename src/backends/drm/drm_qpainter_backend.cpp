@@ -38,26 +38,29 @@ DrmDevice *DrmQPainterBackend::drmDevice() const
     return m_backend->primaryGpu()->drmDevice();
 }
 
-OutputLayer *DrmQPainterBackend::primaryLayer(Output *output)
+QList<OutputLayer *> DrmQPainterBackend::compatibleOutputLayers(Output *output)
 {
-    return static_cast<DrmAbstractOutput *>(output)->primaryLayer();
+    if (auto virtualOutput = qobject_cast<DrmVirtualOutput *>(output)) {
+        return {virtualOutput->primaryLayer()};
+    } else {
+        return static_cast<DrmOutput *>(output)->pipeline()->gpu()->compatibleOutputLayers(output);
+    }
 }
 
-OutputLayer *DrmQPainterBackend::cursorLayer(Output *output)
+std::unique_ptr<DrmPipelineLayer> DrmQPainterBackend::createDrmPlaneLayer(DrmPlane *plane)
 {
-    return static_cast<DrmAbstractOutput *>(output)->cursorLayer();
+    return std::make_unique<DrmQPainterLayer>(plane);
 }
 
-std::shared_ptr<DrmPipelineLayer> DrmQPainterBackend::createDrmPlaneLayer(DrmPipeline *pipeline, DrmPlane::TypeIndex type)
+std::unique_ptr<DrmPipelineLayer> DrmQPainterBackend::createDrmPlaneLayer(DrmGpu *gpu, DrmPlane::TypeIndex type)
 {
-    return std::make_shared<DrmQPainterLayer>(pipeline, type);
+    return std::make_unique<DrmQPainterLayer>(type);
 }
 
-std::shared_ptr<DrmOutputLayer> DrmQPainterBackend::createLayer(DrmVirtualOutput *output)
+std::unique_ptr<DrmOutputLayer> DrmQPainterBackend::createLayer(DrmVirtualOutput *output)
 {
-    return std::make_shared<DrmVirtualQPainterLayer>(output);
+    return std::make_unique<DrmVirtualQPainterLayer>(output);
 }
-
 }
 
 #include "moc_drm_qpainter_backend.cpp"

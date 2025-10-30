@@ -111,6 +111,8 @@ static uint32_t kwinTFtoProtoTF(TransferFunction tf)
         return wp_color_manager_v1_transfer_function::WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_ST2084_PQ;
     case TransferFunction::gamma22:
         return wp_color_manager_v1_transfer_function::WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_GAMMA22;
+    case TransferFunction::BT1886:
+        return wp_color_manager_v1_transfer_function::WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_BT1886;
     }
     Q_UNREACHABLE();
 }
@@ -139,8 +141,8 @@ wp_image_description_v1 *ColorManager::createImageDescription(const ColorDescrip
     if (supportsFeature(WP_COLOR_MANAGER_V1_FEATURE_SET_LUMINANCES)) {
         wp_image_description_creator_params_v1_set_luminances(creator, std::round(color.transferFunction().minLuminance / s_minLuminanceUnit), std::round(color.transferFunction().maxLuminance), std::round(color.referenceLuminance()));
     }
-    if (supportsFeature(WP_COLOR_MANAGER_V1_FEATURE_SET_MASTERING_DISPLAY_PRIMARIES) && color.masteringColorimetry().has_value()) {
-        const auto &c = *color.masteringColorimetry();
+    if (supportsFeature(WP_COLOR_MANAGER_V1_FEATURE_SET_MASTERING_DISPLAY_PRIMARIES)) {
+        const auto &c = color.masteringColorimetry();
         wp_image_description_creator_params_v1_set_mastering_display_primaries(creator,
                                                                                encode(c.red().toxy().x), encode(c.red().toxy().y),
                                                                                encode(c.green().toxy().x), encode(c.green().toxy().y),
@@ -166,14 +168,14 @@ constexpr wp_image_description_info_v1_listener ImageDescriptionListener::s_list
             .max = TransferFunction::defaultMaxLuminanceFor(tfType),
             .reference = TransferFunction::defaultReferenceLuminanceFor(tfType),
         });
-        Q_EMIT listener->done(ColorDescription{
+        Q_EMIT listener->done(std::make_shared<ColorDescription>(ColorDescription{
             listener->m_colorimetry,
             TransferFunction(tfType, luminances.min, luminances.max),
             luminances.reference,
             listener->m_minMasteringLuminance.value_or(luminances.min),
             listener->m_maxFall.value_or(luminances.max),
             listener->m_maxCll.value_or(listener->m_maxMasteringLuminance.value_or(luminances.max)),
-        });
+        }));
         delete listener;
     },
     .icc_file = [](void *data, wp_image_description_info_v1 *wp_image_description_info_v1, int32_t icc, uint32_t icc_size) {
@@ -238,6 +240,9 @@ constexpr wp_image_description_info_v1_listener ImageDescriptionListener::s_list
             break;
         case WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_EXT_LINEAR:
             listener->m_transferFunctionType = TransferFunction::linear;
+            break;
+        case WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_BT1886:
+            listener->m_transferFunctionType = TransferFunction::BT1886;
             break;
         }
     },
@@ -308,7 +313,7 @@ ColorSurfaceFeedback::~ColorSurfaceFeedback()
     wp_color_management_surface_feedback_v1_destroy(m_feedback);
 }
 
-void ColorSurfaceFeedback::setPreferredColor(const ColorDescription &color)
+void ColorSurfaceFeedback::setPreferredColor(const std::shared_ptr<ColorDescription> &color)
 {
     if (color != m_preferred) {
         m_preferred = color;
@@ -316,7 +321,7 @@ void ColorSurfaceFeedback::setPreferredColor(const ColorDescription &color)
     }
 }
 
-const ColorDescription &ColorSurfaceFeedback::preferredColor() const
+const std::shared_ptr<ColorDescription> &ColorSurfaceFeedback::preferredColor() const
 {
     return m_preferred;
 }

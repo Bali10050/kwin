@@ -29,18 +29,22 @@ public:
     ~VirtualOutput() override;
 
     RenderLoop *renderLoop() const override;
-    bool present(const std::shared_ptr<OutputFrame> &frame) override;
+    bool testPresentation(const std::shared_ptr<OutputFrame> &frame) override;
+    bool present(const QList<OutputLayer *> &layersToUpdate, const std::shared_ptr<OutputFrame> &frame) override;
 
     void init(const QPoint &logicalPosition, const QSize &pixelSize, qreal scale, const QList<std::tuple<QSize, uint64_t, OutputMode::Flags>> &modes);
 
     void applyChanges(const OutputConfiguration &config) override;
 
+    void setOutputLayer(std::unique_ptr<OutputLayer> &&layer);
+    OutputLayer *outputLayer() const;
+
 private:
     void vblank(std::chrono::nanoseconds timestamp);
 
-    Q_DISABLE_COPY(VirtualOutput);
     friend class VirtualBackend;
 
+    std::unique_ptr<OutputLayer> m_layer;
     VirtualBackend *m_backend;
     std::unique_ptr<RenderLoop> m_renderLoop;
     std::unique_ptr<SoftwareVsyncMonitor> m_vsyncMonitor;

@@ -30,7 +30,7 @@
 #include "outline.h"
 #include "pluginmanager.h"
 #include "pointer_input.h"
-#include "scene/cursorscene.h"
+#include "scene/workspacescene.h"
 #include "screenedge.h"
 #include "sm.h"
 #include "tabletmodemanager.h"
@@ -40,10 +40,6 @@
 #if KWIN_BUILD_X11
 #include "utils/xcbutils.h"
 #include "x11eventfilter.h"
-#endif
-
-#if KWIN_BUILD_SCREENLOCKER
-#include "screenlockerwatcher.h"
 #endif
 
 #include "effect/effecthandler.h"
@@ -67,8 +63,6 @@
 #include <unistd.h>
 
 #if KWIN_BUILD_X11
-// xcb
-#include <xcb/damage.h>
 #ifndef XCB_GE_GENERIC
 #define XCB_GE_GENERIC 35
 #endif
@@ -247,9 +241,6 @@ void Application::createWorkspace()
 
 void Application::createInput()
 {
-#if KWIN_BUILD_SCREENLOCKER
-    m_screenLockerWatcher = std::make_unique<ScreenLockerWatcher>();
-#endif
     auto input = InputRedirection::create(this);
     input->init();
 }
@@ -634,20 +625,12 @@ XwaylandInterface *Application::xwayland() const
     return nullptr;
 }
 
-#if KWIN_BUILD_SCREENLOCKER
-ScreenLockerWatcher *Application::screenLockerWatcher() const
-{
-    return m_screenLockerWatcher.get();
-}
-#endif
-
 static PlatformCursorImage grabCursorOpenGL()
 {
-    CursorScene *scene = Compositor::self()->cursorScene();
+    auto scene = Compositor::self()->scene();
     if (!scene) {
-        return PlatformCursorImage();
+        return PlatformCursorImage{};
     }
-
     Cursor *cursor = Cursors::self()->currentCursor();
     Output *output = workspace()->outputAt(cursor->pos());
 
@@ -659,10 +642,11 @@ static PlatformCursorImage grabCursorOpenGL()
     GLFramebuffer framebuffer(texture.get());
     RenderTarget renderTarget(&framebuffer);
 
-    SceneDelegate delegate(scene, output);
-    scene->prePaint(&delegate);
-    scene->paint(renderTarget, infiniteRegion());
-    scene->postPaint();
+    SceneView sceneView(scene, output, nullptr);
+    ItemTreeView cursorView(&sceneView, scene->cursorItem(), output, nullptr);
+    cursorView.prePaint();
+    cursorView.paint(renderTarget, infiniteRegion());
+    cursorView.postPaint();
 
     QImage image = texture->toImage();
     image.setDevicePixelRatio(output->scale());
@@ -672,21 +656,21 @@ static PlatformCursorImage grabCursorOpenGL()
 
 static PlatformCursorImage grabCursorSoftware()
 {
-    CursorScene *scene = Compositor::self()->cursorScene();
+    auto scene = Compositor::self()->scene();
     if (!scene) {
-        return PlatformCursorImage();
+        return PlatformCursorImage{};
     }
-
     Cursor *cursor = Cursors::self()->currentCursor();
     Output *output = workspace()->outputAt(cursor->pos());
 
     QImage image((cursor->geometry().size() * output->scale()).toSize(), QImage::Format_ARGB32_Premultiplied);
     RenderTarget renderTarget(&image);
 
-    SceneDelegate delegate(scene, output);
-    scene->prePaint(&delegate);
-    scene->paint(renderTarget, infiniteRegion());
-    scene->postPaint();
+    SceneView sceneView(scene, output, nullptr);
+    ItemTreeView cursorView(&sceneView, scene->cursorItem(), output, nullptr);
+    cursorView.prePaint();
+    cursorView.paint(renderTarget, infiniteRegion());
+    cursorView.postPaint();
 
     image.setDevicePixelRatio(output->scale());
     return PlatformCursorImage(image, cursor->hotspot());

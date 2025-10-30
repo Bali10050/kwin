@@ -36,8 +36,11 @@ struct BlurEffectData
     /// The region that should be blurred behind the frame
     std::optional<QRegion> frame;
 
-    /// The render data per screen. Screens can have different color spaces.
-    std::unordered_map<Output *, BlurRenderData> render;
+    /**
+     * The render data per render view, as they can have different
+     *  color spaces and even different windows on them
+     */
+    std::unordered_map<RenderView *, BlurRenderData> render;
 
     ItemEffect windowEffect;
 };
@@ -73,7 +76,7 @@ public:
 public Q_SLOTS:
     void slotWindowAdded(KWin::EffectWindow *w);
     void slotWindowDeleted(KWin::EffectWindow *w);
-    void slotScreenRemoved(KWin::Output *screen);
+    void slotViewRemoved(KWin::RenderView *view);
 #if KWIN_BUILD_X11
     void slotPropertyNotify(KWin::EffectWindow *w, long atom);
 #endif
@@ -81,6 +84,7 @@ public Q_SLOTS:
 
 private:
     void initBlurStrengthValues();
+    QMatrix4x4 colorMatrix(qreal saturation);
     QRegion blurRegion(EffectWindow *w) const;
     QRegion decorationBlurRegion(const EffectWindow *w) const;
     bool decorationSupportsBlurBehind(const EffectWindow *w) const;
@@ -90,6 +94,27 @@ private:
     GLTexture *ensureNoiseTexture();
 
 private:
+    struct
+    {
+        std::unique_ptr<GLShader> shader;
+        int mvpMatrixLocation;
+        int colorMatrixLocation;
+        int offsetLocation;
+        int halfpixelLocation;
+    } m_contrastPass;
+
+    struct
+    {
+        std::unique_ptr<GLShader> shader;
+        int mvpMatrixLocation;
+        int colorMatrixLocation;
+        int offsetLocation;
+        int halfpixelLocation;
+        int boxLocation;
+        int cornerRadiusLocation;
+        int opacityLocation;
+    } m_roundedContrastPass;
+
     struct
     {
         std::unique_ptr<GLShader> shader;
@@ -111,7 +136,6 @@ private:
         std::unique_ptr<GLShader> shader;
         int mvpMatrixLocation;
         int noiseTextureSizeLocation;
-        int texStartPosLocation;
 
         std::unique_ptr<GLTexture> noiseTexture;
         qreal noiseTextureScale = 1.0;
@@ -123,8 +147,8 @@ private:
     long net_wm_blur_region = 0;
 #endif
     QRegion m_paintedArea; // keeps track of all painted areas (from bottom to top)
-    QRegion m_currentBlur; // keeps track of the currently blured area of the windows(from bottom to top)
-    Output *m_currentScreen = nullptr;
+    QRegion m_currentBlur; // keeps track of currently blurred area of the windows (from bottom to top)
+    RenderView *m_currentView = nullptr;
 
     size_t m_iterationCount; // number of times the texture will be downsized to half size
     int m_offset;
@@ -150,6 +174,8 @@ private:
 
     QMap<EffectWindow *, QMetaObject::Connection> windowBlurChangedConnections;
     std::unordered_map<EffectWindow *, BlurEffectData> m_windows;
+
+    qreal m_saturation = 3;
 
     static BlurManagerInterface *s_blurManager;
     static QTimer *s_blurManagerRemoveTimer;

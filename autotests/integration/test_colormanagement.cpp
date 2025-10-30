@@ -89,6 +89,8 @@ private Q_SLOTS:
     void testUnsupportedPrimaries();
     void testNoPrimaries();
     void testNoTf();
+    void testRenderIntentOnly();
+    void testInertError();
 };
 
 void ColorManagementTest::initTestCase()
@@ -126,94 +128,181 @@ void ColorManagementTest::cleanup()
 
 void ColorManagementTest::testSetImageDescription_data()
 {
-    QTest::addColumn<ColorDescription>("input");
+    QTest::addColumn<std::shared_ptr<ColorDescription>>("input");
     QTest::addColumn<RenderingIntent>("renderingIntent");
     QTest::addColumn<bool>("protocolError");
     QTest::addColumn<bool>("shouldSucceed");
-    QTest::addColumn<std::optional<ColorDescription>>("expectedResult");
+    QTest::addColumn<std::optional<std::shared_ptr<ColorDescription>>>("expectedResult");
 
     // sRGB is not tested, because it's the default (and thus no change signal will be emitted)
     QTest::addRow("rec.2020 PQ")
-        << ColorDescription(Colorimetry::BT2020, TransferFunction(TransferFunction::PerceptualQuantizer), 203, 0, 400, 400)
+        << std::make_shared<ColorDescription>(ColorDescription{
+               Colorimetry::BT2020,
+               TransferFunction(TransferFunction::PerceptualQuantizer),
+               203,
+               0,
+               400,
+               400,
+           })
         << RenderingIntent::Perceptual
         << false << true
-        << std::optional<ColorDescription>();
+        << std::optional<std::shared_ptr<ColorDescription>>();
     QTest::addRow("scRGB")
-        << ColorDescription(Colorimetry::BT709, TransferFunction(TransferFunction::linear, 0, 80), 80, 0, 80, 80)
+        << std::make_shared<ColorDescription>(ColorDescription{
+               Colorimetry::BT709,
+               TransferFunction(TransferFunction::linear, 0, 80),
+               80,
+               0,
+               80,
+               80,
+           })
         << RenderingIntent::Perceptual
         << false << true
-        << std::optional<ColorDescription>();
+        << std::optional<std::shared_ptr<ColorDescription>>();
     QTest::addRow("custom")
-        << ColorDescription(Colorimetry::BT2020, TransferFunction(TransferFunction::gamma22, 0.05, 400), 203, 0, 400, 400)
+        << std::make_shared<ColorDescription>(ColorDescription{
+               Colorimetry::BT2020,
+               TransferFunction(TransferFunction::gamma22, 0.05, 400),
+               203,
+               0,
+               400,
+               400,
+           })
         << RenderingIntent::Perceptual
         << false << true
-        << std::optional<ColorDescription>();
+        << std::optional<std::shared_ptr<ColorDescription>>();
     QTest::addRow("invalid tf")
-        << ColorDescription(Colorimetry::BT2020, TransferFunction(TransferFunction::gamma22, 204, 205), 203, 0, 400, 400)
+        << std::make_shared<ColorDescription>(ColorDescription{
+               Colorimetry::BT2020,
+               TransferFunction(TransferFunction::gamma22, 204, 205),
+               203,
+               0,
+               400,
+               400,
+           })
         << RenderingIntent::Perceptual
         << true << false
-        << std::optional<ColorDescription>();
+        << std::optional<std::shared_ptr<ColorDescription>>();
     QTest::addRow("invalid HDR metadata")
-        << ColorDescription(Colorimetry::BT2020, TransferFunction(TransferFunction::PerceptualQuantizer), 203, 500, 400, 400)
+        << std::make_shared<ColorDescription>(ColorDescription{
+               Colorimetry::BT2020,
+               TransferFunction(TransferFunction::PerceptualQuantizer),
+               203,
+               500,
+               400,
+               400,
+           })
         << RenderingIntent::Perceptual
         << true << false
-        << std::optional<ColorDescription>();
+        << std::optional<std::shared_ptr<ColorDescription>>();
     QTest::addRow("rec.2020 PQ with out of bounds white point")
-        << ColorDescription(Colorimetry::BT2020.withWhitepoint(xyY{0.9, 0.9, 1}), TransferFunction(TransferFunction::PerceptualQuantizer), 203, 0, 400, 400)
+        << std::make_shared<ColorDescription>(ColorDescription{
+               Colorimetry::BT2020.withWhitepoint(xyY{0.9, 0.9, 1}),
+               TransferFunction(TransferFunction::PerceptualQuantizer),
+               203,
+               0,
+               400,
+               400,
+           })
         << RenderingIntent::Perceptual
         << false << false
-        << std::optional<ColorDescription>();
+        << std::optional<std::shared_ptr<ColorDescription>>();
     QTest::addRow("nonsense primaries")
-        << ColorDescription(Colorimetry(xy{0, 0}, xy{0, 0}, xy{0, 0}, xy{0, 0}), TransferFunction(TransferFunction::PerceptualQuantizer), 203, 0, 400, 400)
+        << std::make_shared<ColorDescription>(ColorDescription{
+               Colorimetry(xy{0, 0}, xy{0, 0}, xy{0, 0}, xy{0, 0}),
+               TransferFunction(TransferFunction::PerceptualQuantizer),
+               203,
+               0,
+               400,
+               400,
+           })
         << RenderingIntent::Perceptual
         << false << false
-        << std::optional<ColorDescription>();
+        << std::optional<std::shared_ptr<ColorDescription>>();
     QTest::addRow("custom PQ luminances are ignored")
-        << ColorDescription(Colorimetry::BT2020, TransferFunction(TransferFunction::PerceptualQuantizer, 10, 100), 203, 0, 400, 400)
+        << std::make_shared<ColorDescription>(ColorDescription{
+               Colorimetry::BT2020,
+               TransferFunction(TransferFunction::PerceptualQuantizer, 10, 100),
+               203,
+               0,
+               400,
+               400,
+           })
         << RenderingIntent::Perceptual
         << false << true
-        << std::make_optional<ColorDescription>(Colorimetry::BT2020, TransferFunction(TransferFunction::PerceptualQuantizer, 10, 10'010), 203, 0, 400, 400);
+        << std::optional(std::make_shared<ColorDescription>(ColorDescription{
+               Colorimetry::BT2020,
+               TransferFunction(TransferFunction::PerceptualQuantizer, 10, 10'010),
+               203,
+               0,
+               400,
+               400,
+           }));
 
     QTest::addRow("rec.2020 PQ relative colorimetric")
-        << ColorDescription(Colorimetry::BT2020, TransferFunction(TransferFunction::PerceptualQuantizer), 203, 0, 400, 400)
+        << std::make_shared<ColorDescription>(ColorDescription{
+               Colorimetry::BT2020,
+               TransferFunction(TransferFunction::PerceptualQuantizer),
+               203,
+               0,
+               400,
+               400,
+           })
         << RenderingIntent::RelativeColorimetric
         << false << true
-        << std::optional<ColorDescription>();
+        << std::optional<std::shared_ptr<ColorDescription>>();
     QTest::addRow("rec.2020 PQ relative colorimetric bpc")
-        << ColorDescription(Colorimetry::BT2020, TransferFunction(TransferFunction::PerceptualQuantizer), 203, 0, 400, 400)
+        << std::make_shared<ColorDescription>(ColorDescription{
+               Colorimetry::BT2020,
+               TransferFunction(TransferFunction::PerceptualQuantizer),
+               203,
+               0,
+               400,
+               400,
+           })
         << RenderingIntent::RelativeColorimetricWithBPC
         << false << true
-        << std::optional<ColorDescription>();
-    QTest::addRow("rec.2020 PQ absolute colorimetric")
-        << ColorDescription(Colorimetry::BT2020, TransferFunction(TransferFunction::PerceptualQuantizer), 203, 0, 400, 400)
-        << RenderingIntent::AbsoluteColorimetric
+        << std::optional<std::shared_ptr<ColorDescription>>();
+    // TODO uncomment this once a matching rendering intent is added to the Wayland protocol
+    // QTest::addRow("rec.2020 PQ absolute colorimetric")
+    //     << std::make_shared<ColorDescription>(ColorDescription{
+    //            Colorimetry::BT2020,
+    //            TransferFunction(TransferFunction::PerceptualQuantizer),
+    //            203,
+    //            0,
+    //            400,
+    //            400,
+    //        })
+    //     << RenderingIntent::AbsoluteColorimetricNoAdaptation
+    //     << false << true
+    //     << std::optional<std::shared_ptr<ColorDescription>>();
+    QTest::addRow("rec.709 + BT1886")
+        << std::make_shared<ColorDescription>(ColorDescription{
+               Colorimetry::BT709,
+               TransferFunction(TransferFunction::BT1886),
+               100,
+               0.1,
+               100,
+               100,
+           })
+        << RenderingIntent::Perceptual
         << false << true
-        << std::optional<ColorDescription>();
+        << std::optional<std::shared_ptr<ColorDescription>>();
 }
 
-void ColorManagementTest::testSetImageDescription()
+static ImageDescription createImageDescription(ColorManagementSurface *surface, const ColorDescription &color)
 {
-    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
-    std::unique_ptr<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.get()));
-    auto window = Test::renderAndWaitForShown(surface.get(), QSize(100, 50), Qt::blue);
-    QVERIFY(window);
-
-    auto cmSurf = std::make_unique<ColorManagementSurface>(Test::colorManager()->get_surface(*surface));
-
     QtWayland::wp_image_description_creator_params_v1 creator(Test::colorManager()->create_parametric_creator());
 
-    QFETCH(ColorDescription, input);
-    QFETCH(RenderingIntent, renderingIntent);
-
-    creator.set_primaries(std::round(1'000'000.0 * input.containerColorimetry().red().toxyY().x),
-                          std::round(1'000'000.0 * input.containerColorimetry().red().toxyY().y),
-                          std::round(1'000'000.0 * input.containerColorimetry().green().toxyY().x),
-                          std::round(1'000'000.0 * input.containerColorimetry().green().toxyY().y),
-                          std::round(1'000'000.0 * input.containerColorimetry().blue().toxyY().x),
-                          std::round(1'000'000.0 * input.containerColorimetry().blue().toxyY().y),
-                          std::round(1'000'000.0 * input.containerColorimetry().white().toxyY().x),
-                          std::round(1'000'000.0 * input.containerColorimetry().white().toxyY().y));
-    switch (input.transferFunction().type) {
+    creator.set_primaries(std::round(1'000'000.0 * color.containerColorimetry().red().toxyY().x),
+                          std::round(1'000'000.0 * color.containerColorimetry().red().toxyY().y),
+                          std::round(1'000'000.0 * color.containerColorimetry().green().toxyY().x),
+                          std::round(1'000'000.0 * color.containerColorimetry().green().toxyY().y),
+                          std::round(1'000'000.0 * color.containerColorimetry().blue().toxyY().x),
+                          std::round(1'000'000.0 * color.containerColorimetry().blue().toxyY().y),
+                          std::round(1'000'000.0 * color.containerColorimetry().white().toxyY().x),
+                          std::round(1'000'000.0 * color.containerColorimetry().white().toxyY().y));
+    switch (color.transferFunction().type) {
     case TransferFunction::sRGB:
         creator.set_tf_named(WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_SRGB);
         break;
@@ -226,13 +315,31 @@ void ColorManagementTest::testSetImageDescription()
     case TransferFunction::PerceptualQuantizer:
         creator.set_tf_named(WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_ST2084_PQ);
         break;
+    case TransferFunction::BT1886:
+        creator.set_tf_named(WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_BT1886);
+        break;
     }
-    creator.set_luminances(std::round(input.transferFunction().minLuminance * 10'000), std::round(input.transferFunction().maxLuminance), std::round(input.referenceLuminance()));
-    creator.set_max_fall(std::round(input.maxAverageLuminance().value_or(0)));
-    creator.set_max_cll(std::round(input.maxHdrLuminance().value_or(0)));
-    creator.set_mastering_luminance(std::round(input.minLuminance() * 10'000), std::round(input.maxHdrLuminance().value_or(0)));
+    creator.set_luminances(std::round(color.transferFunction().minLuminance * 10'000), std::round(color.transferFunction().maxLuminance), std::round(color.referenceLuminance()));
+    creator.set_max_fall(std::round(color.maxAverageLuminance().value_or(0)));
+    creator.set_max_cll(std::round(color.maxHdrLuminance().value_or(0)));
+    creator.set_mastering_luminance(std::round(color.minLuminance() * 10'000), std::round(color.maxHdrLuminance().value_or(0)));
 
-    ImageDescription imageDescr(wp_image_description_creator_params_v1_create(creator.object()));
+    return ImageDescription(wp_image_description_creator_params_v1_create(creator.object()));
+}
+
+void ColorManagementTest::testSetImageDescription()
+{
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.get()));
+    auto window = Test::renderAndWaitForShown(surface.get(), QSize(100, 50), Qt::blue);
+    QVERIFY(window);
+
+    auto cmSurf = std::make_unique<ColorManagementSurface>(Test::colorManager()->get_surface(*surface));
+
+    QFETCH(std::shared_ptr<ColorDescription>, input);
+    QFETCH(RenderingIntent, renderingIntent);
+
+    ImageDescription imageDescr = createImageDescription(cmSurf.get(), *input);
 
     QFETCH(bool, protocolError);
     if (protocolError) {
@@ -252,15 +359,15 @@ void ColorManagementTest::testSetImageDescription()
     case RenderingIntent::RelativeColorimetricWithBPC:
         waylandRenderIntent = WP_COLOR_MANAGER_V1_RENDER_INTENT_RELATIVE_BPC;
         break;
-    case RenderingIntent::AbsoluteColorimetric:
-        waylandRenderIntent = WP_COLOR_MANAGER_V1_RENDER_INTENT_ABSOLUTE;
+    case RenderingIntent::AbsoluteColorimetricNoAdaptation:
+        Q_UNREACHABLE();
         break;
     default:
         Q_UNREACHABLE();
     }
 
     QFETCH(bool, shouldSucceed);
-    QFETCH(std::optional<ColorDescription>, expectedResult);
+    QFETCH(std::optional<std::shared_ptr<ColorDescription>>, expectedResult);
     if (shouldSucceed) {
         QSignalSpy ready(&imageDescr, &ImageDescription::ready);
         QVERIFY(ready.wait(50ms));
@@ -271,7 +378,7 @@ void ColorManagementTest::testSetImageDescription()
         QSignalSpy colorChange(window->surface(), &SurfaceInterface::colorDescriptionChanged);
         QVERIFY(colorChange.wait());
 
-        QCOMPARE(window->surface()->colorDescription(), expectedResult.value_or(input));
+        QCOMPARE(*window->surface()->colorDescription(), *expectedResult.value_or(input));
         QCOMPARE(window->surface()->renderingIntent(), renderingIntent);
     } else {
         QSignalSpy fail(&imageDescr, &ImageDescription::failed);
@@ -307,6 +414,59 @@ void ColorManagementTest::testNoTf()
     QtWayland::wp_image_description_creator_params_v1 creator = QtWayland::wp_image_description_creator_params_v1(Test::colorManager()->create_parametric_creator());
     creator.set_primaries_named(WP_COLOR_MANAGER_V1_PRIMARIES_CIE1931_XYZ);
     wp_image_description_creator_params_v1_create(creator.object());
+    QSignalSpy error(Test::waylandConnection(), &KWayland::Client::ConnectionThread::errorOccurred);
+    QVERIFY(error.wait(50ms));
+}
+
+void ColorManagementTest::testRenderIntentOnly()
+{
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.get()));
+    auto window = Test::renderAndWaitForShown(surface.get(), QSize(100, 50), Qt::blue);
+    QVERIFY(window);
+
+    const auto color = std::make_shared<ColorDescription>(ColorDescription{
+        Colorimetry::BT2020,
+        TransferFunction(TransferFunction::PerceptualQuantizer),
+    });
+
+    auto cmSurf = std::make_unique<ColorManagementSurface>(Test::colorManager()->get_surface(*surface));
+    ImageDescription imageDescr = createImageDescription(cmSurf.get(), *color);
+
+    QSignalSpy ready(&imageDescr, &ImageDescription::ready);
+    QVERIFY(ready.wait(50ms));
+
+    cmSurf->set_image_description(imageDescr.object(), WP_COLOR_MANAGER_V1_RENDER_INTENT_PERCEPTUAL);
+    surface->commit(KWayland::Client::Surface::CommitFlag::None);
+
+    QSignalSpy colorChange(window->surface(), &SurfaceInterface::colorDescriptionChanged);
+    QVERIFY(colorChange.wait());
+
+    QCOMPARE(*window->surface()->colorDescription(), *color);
+    QCOMPARE(window->surface()->renderingIntent(), RenderingIntent::Perceptual);
+
+    // only changing the rendering intent should also trigger the colorDescriptionChanged signal to be emitted
+    cmSurf->set_image_description(imageDescr.object(), WP_COLOR_MANAGER_V1_RENDER_INTENT_RELATIVE);
+    surface->commit(KWayland::Client::Surface::CommitFlag::None);
+
+    QVERIFY(colorChange.wait());
+    QCOMPARE(window->surface()->colorDescription(), color);
+    QCOMPARE(window->surface()->renderingIntent(), RenderingIntent::RelativeColorimetric);
+}
+
+void ColorManagementTest::testInertError()
+{
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+
+    auto cmSurf = std::make_unique<ColorManagementSurface>(Test::colorManager()->get_surface(*surface));
+    ImageDescription imageDescr = createImageDescription(cmSurf.get(), *ColorDescription::sRGB);
+
+    QSignalSpy ready(&imageDescr, &ImageDescription::ready);
+    QVERIFY(ready.wait(50ms));
+
+    surface.reset();
+    cmSurf->set_image_description(imageDescr.object(), WP_COLOR_MANAGER_V1_RENDER_INTENT_PERCEPTUAL);
+
     QSignalSpy error(Test::waylandConnection(), &KWayland::Client::ConnectionThread::errorOccurred);
     QVERIFY(error.wait(50ms));
 }

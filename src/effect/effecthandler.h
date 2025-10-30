@@ -28,6 +28,8 @@
 #include <QLoggingCategory>
 #include <QStack>
 
+#include <KConfigWatcher>
+
 #include <functional>
 
 #if KWIN_BUILD_X11
@@ -278,7 +280,7 @@ public:
      * If the @p border gets triggered through a touch swipe gesture the QAction::triggered
      * signal gets invoked.
      *
-     * progressCallback will be dinamically called each time the touch position is updated
+     * progressCallback will be dynamically called each time the touch position is updated
      * to show the effect "partially" activated
      *
      * To unregister the touch screen action either delete the @p action or
@@ -424,7 +426,7 @@ public:
      * Finds the EffectWindow for the internal window @p w.
      * If there is no such window @c null is returned.
      *
-     * On Wayland this returns the internal window. On X11 it returns an Unamanged with the
+     * On Wayland this returns the internal window. On X11 it returns an Unmanaged with the
      * window id matching that of the provided window @p w.
      *
      * @since 5.16
@@ -783,8 +785,8 @@ Q_SIGNALS:
     void desktopChanged(KWin::VirtualDesktop *oldDesktop, KWin::VirtualDesktop *newDesktop, KWin::EffectWindow *with);
 
     /**
-     * Signal emmitted while desktop is changing for animation.
-     * @param currentDesktop The current desktop untiotherwise.
+     * Signal emitted while desktop is changing for animation.
+     * @param currentDesktop The current desktop until otherwise.
      * @param offset The current desktop offset.
      * offset.x() = .6 means 60% of the way to the desktop to the right.
      * Positive Values means Up and Right.
@@ -793,6 +795,7 @@ Q_SIGNALS:
     void desktopChangingCancelled();
     void desktopAdded(KWin::VirtualDesktop *desktop);
     void desktopRemoved(KWin::VirtualDesktop *desktop);
+    void desktopMoved(KWin::VirtualDesktop *desktop, int position);
 
     /**
      * Emitted when the virtual desktop grid layout changes
@@ -835,7 +838,7 @@ Q_SIGNALS:
      */
     void windowClosed(KWin::EffectWindow *w);
     /**
-     * Signal emitted when a window get's activated.
+     * Signal emitted when a window gets activated.
      * @param w The new active window, or @c NULL if there is no active window.
      * @since 4.7
      */
@@ -873,7 +876,7 @@ Q_SIGNALS:
     void tabBoxClosed();
     /**
      * Signal emitted when the selected TabBox window changed or the TabBox List changed.
-     * An effect should only response to this signal if it referenced the TabBox with refTabBox.
+     * An effect should only respond to this signal if it referenced the TabBox with refTabBox.
      * @see refTabBox
      * @see currentTabBoxWindowList
      * @see currentTabBoxDesktopList
@@ -883,9 +886,9 @@ Q_SIGNALS:
      */
     void tabBoxUpdated();
     /**
-     * Signal emitted when a key event, which is not handled by TabBox directly is, happens while
+     * Signal emitted when a key event, which is not handled by TabBox directly, happens while
      * TabBox is active. An effect might use the key event to e.g. change the selected window.
-     * An effect should only response to this signal if it referenced the TabBox with refTabBox.
+     * An effect should only respond to this signal if it referenced the TabBox with refTabBox.
      * @param event The key event not handled by TabBox directly
      * @see refTabBox
      * @since 4.7
@@ -965,7 +968,7 @@ Q_SIGNALS:
     void screenAboutToLock();
 
     /**
-     * This signels is emitted when ever the stacking order is change, ie. a window is risen
+     * This signal is emitted whenever the stacking order is changed, i.e. a window is raised
      * or lowered
      * @since 4.10
      */
@@ -1057,6 +1060,8 @@ Q_SIGNALS:
 
     void inputPanelChanged();
 
+    void viewRemoved(RenderView *view);
+
 public Q_SLOTS:
     // slots for D-Bus interface
     Q_SCRIPTABLE void reconfigureEffect(const QString &name);
@@ -1076,6 +1081,7 @@ protected:
     void registerPropertyType(long atom, bool reg);
     void destroyEffect(Effect *effect);
     void reconfigureEffects();
+    void configChanged(const KConfigGroup &group, const QByteArrayList &names);
 
     typedef QList<Effect *> EffectsList;
     typedef EffectsList::const_iterator EffectsIterator;
@@ -1109,6 +1115,7 @@ protected:
     QList<Effect *> m_grabbedMouseEffects;
     EffectLoader *m_effectLoader;
     std::unique_ptr<WindowPropertyNotifyX11Filter> m_x11WindowPropertyNotify;
+    KConfigWatcher::Ptr m_configWatcher;
 };
 
 /**

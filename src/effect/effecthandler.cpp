@@ -54,7 +54,7 @@
 #include "tabbox/tabbox.h"
 #endif
 #if KWIN_BUILD_SCREENLOCKER
-#include "screenlockerwatcher.h"
+#include <KScreenLocker/KsldApp>
 #endif
 
 #include <KDecoration3/Decoration>
@@ -148,6 +148,10 @@ EffectsHandler::EffectsHandler(Compositor *compositor, WorkspaceScene *scene)
         effectsChanged();
     });
     m_effectLoader->setConfig(kwinApp()->config());
+
+    m_configWatcher = KConfigWatcher::create(kwinApp()->config());
+    connect(m_configWatcher.get(), &KConfigWatcher::configChanged, this, &EffectsHandler::configChanged);
+
     new EffectsAdaptor(this);
     QDBusConnection dbus = QDBusConnection::sessionBus();
     dbus.registerObject(QStringLiteral("/Effects"), this);
@@ -189,6 +193,7 @@ EffectsHandler::EffectsHandler(Compositor *compositor, WorkspaceScene *scene)
     });
     connect(vds, &VirtualDesktopManager::desktopAdded, this, &EffectsHandler::desktopAdded);
     connect(vds, &VirtualDesktopManager::desktopRemoved, this, &EffectsHandler::desktopRemoved);
+    connect(vds, &VirtualDesktopManager::desktopMoved, this, &EffectsHandler::desktopMoved);
     connect(ws, &Workspace::geometryChanged, this, &EffectsHandler::virtualScreenSizeChanged);
     connect(ws, &Workspace::geometryChanged, this, &EffectsHandler::virtualScreenGeometryChanged);
 #if KWIN_BUILD_ACTIVITIES
@@ -209,8 +214,12 @@ EffectsHandler::EffectsHandler(Compositor *compositor, WorkspaceScene *scene)
 #endif
     connect(workspace()->screenEdges(), &ScreenEdges::approaching, this, &EffectsHandler::screenEdgeApproaching);
 #if KWIN_BUILD_SCREENLOCKER
-    connect(kwinApp()->screenLockerWatcher(), &ScreenLockerWatcher::locked, this, &EffectsHandler::screenLockingChanged);
-    connect(kwinApp()->screenLockerWatcher(), &ScreenLockerWatcher::aboutToLock, this, &EffectsHandler::screenAboutToLock);
+    connect(ScreenLocker::KSldApp::self(), &ScreenLocker::KSldApp::lockStateChanged, this, [this] {
+        const bool locked = ScreenLocker::KSldApp::self()->lockState() == ScreenLocker::KSldApp::Locked;
+        Q_EMIT screenLockingChanged(locked);
+    });
+
+    connect(ScreenLocker::KSldApp::self(), &ScreenLocker::KSldApp::aboutToLock, this, &EffectsHandler::screenAboutToLock);
 #endif
 
     m_cursor.position = input()->globalPointer();
@@ -281,6 +290,8 @@ EffectsHandler::EffectsHandler(Compositor *compositor, WorkspaceScene *scene)
     }
 
     connect(Cursors::self()->mouse(), &Cursor::cursorChanged, this, &EffectsHandler::cursorShapeChanged);
+
+    connect(scene, &WorkspaceScene::viewRemoved, this, &EffectsHandler::viewRemoved);
 
     reconfigure();
 }
@@ -943,10 +954,8 @@ EffectWindow *EffectsHandler::findWindow(WId id) const
 }
 EffectWindow *EffectsHandler::findWindow(SurfaceInterface *surf) const
 {
-    if (waylandServer()) {
-        if (Window *w = waylandServer()->findWindow(surf)) {
-            return w->effectWindow();
-        }
+    if (Window *w = waylandServer()->findWindow(surf)) {
+        return w->effectWindow();
     }
     return nullptr;
 }
@@ -1362,10 +1371,7 @@ bool EffectsHandler::blocksDirectScanout() const
 
 Display *EffectsHandler::waylandDisplay() const
 {
-    if (waylandServer()) {
-        return waylandServer()->display();
-    }
-    return nullptr;
+    return waylandServer()->display();
 }
 
 QVariant EffectsHandler::kwinOption(KWinOption kwopt)
@@ -1411,7 +1417,7 @@ QString EffectsHandler::supportInformation(const QString &name) const
 bool EffectsHandler::isScreenLocked() const
 {
 #if KWIN_BUILD_SCREENLOCKER
-    return kwinApp()->screenLockerWatcher()->isLocked();
+    return ScreenLocker::KSldApp::self()->lockState() == ScreenLocker::KSldApp::Locked;
 #else
     return false;
 #endif
@@ -1648,6 +1654,44 @@ bool EffectsHandler::isInputPanelOverlay() const
 QQmlEngine *EffectsHandler::qmlEngine() const
 {
     return Scripting::self()->qmlEngine();
+}
+
+void EffectsHandler::configChanged(const KConfigGroup &group, const QByteArrayList &names)
+{
+    if (group.name() != QLatin1String("Plugins")) {
+        return;
+    }
+
+    QStringList toLoad;
+    QStringList toUnload;
+
+    for (const QByteArray &key : names) {
+        if (!key.endsWith("Enabled")) {
+            continue;
+        }
+        const QString effectName = QString::fromUtf8(key).replace(QStringLiteral("Enabled"), QString());
+        auto md = m_effectLoader->findEffect(effectName);
+
+        if (md.isValid()) {
+            const auto result = m_effectLoader->readConfig(effectName, md.isEnabledByDefault());
+
+            if (result.testFlag(LoadEffectFlag::Load)) {
+                toLoad << effectName;
+            } else {
+                toUnload << effectName;
+            }
+        }
+    }
+
+    // Unload effects first, it's need to ensure that switching between mutually exclusive
+    // effects works as expected, for example so global shortcuts are handed over, etc.
+    for (const QString &effect : std::as_const(toUnload)) {
+        unloadEffect(effect);
+    }
+
+    for (const QString &effect : std::as_const(toLoad)) {
+        loadEffect(effect);
+    }
 }
 
 EffectsHandler *effects = nullptr;

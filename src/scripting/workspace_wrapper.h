@@ -35,7 +35,7 @@ class WorkspaceWrapper : public QObject
     // TODO: write and notify?
     Q_PROPERTY(QSize desktopGridSize READ desktopGridSize NOTIFY desktopLayoutChanged)
     Q_PROPERTY(int desktopGridWidth READ desktopGridWidth NOTIFY desktopLayoutChanged)
-    Q_PROPERTY(int desktopGridHeight READ desktopGridHeight NOTIFY desktopLayoutChanged)
+    Q_PROPERTY(int desktopGridHeight READ desktopGridHeight WRITE setDesktopGridHeight NOTIFY desktopLayoutChanged)
     Q_PROPERTY(int workspaceWidth READ workspaceWidth)
     Q_PROPERTY(int workspaceHeight READ workspaceHeight)
     Q_PROPERTY(QSize workspaceSize READ workspaceSize)
@@ -60,7 +60,7 @@ class WorkspaceWrapper : public QObject
     Q_PROPERTY(QRect virtualScreenGeometry READ virtualScreenGeometry NOTIFY virtualScreenGeometryChanged)
 
     /**
-     * List of Clients currently managed by KWin, orderd by
+     * List of Clients currently managed by KWin, ordered by
      * their visibility (later ones cover earlier ones).
      */
     Q_PROPERTY(QList<KWin::Window *> stackingOrder READ stackingOrder)
@@ -199,7 +199,10 @@ public:
 
     QSize desktopGridSize() const;
     int desktopGridWidth() const;
+
     int desktopGridHeight() const;
+    void setDesktopGridHeight(int height);
+
     int workspaceWidth() const;
     int workspaceHeight() const;
     QSize workspaceSize() const;
@@ -275,7 +278,7 @@ public:
     Q_SCRIPTABLE QString supportInformation() const;
 
     /**
-     * List of Clients currently managed by KWin, orderd by
+     * List of Clients currently managed by KWin, ordered by
      * their visibility (later ones cover earlier ones).
      */
     QList<KWin::Window *> stackingOrder() const;
@@ -313,6 +316,26 @@ public:
      */
     Q_INVOKABLE bool isEffectActive(const QString &pluginId) const;
 
+    /**
+     * Defines that a window needs to remain under another
+     *
+     * @param below the window that will be underneath
+     * @param above the window that will be over
+     *
+     * @since 6.5
+     */
+    Q_INVOKABLE void constrain(KWin::Window *below, KWin::Window *above);
+
+    /**
+     * Breaks the constraint where a window is to remain under another
+     *
+     * @param below the window that was set to be underneath
+     * @param above the window that was set to be over
+     *
+     * @since 6.5
+     */
+    Q_INVOKABLE void unconstrain(KWin::Window *below, KWin::Window *above);
+
 public Q_SLOTS:
     // all the available key bindings
     void slotSwitchDesktopNext();
@@ -341,7 +364,6 @@ public Q_SLOTS:
     void slotWindowMaximizeVertical();
     void slotWindowMaximizeHorizontal();
     void slotWindowMinimize();
-    void slotWindowShade();
     void slotWindowRaise();
     void slotWindowLower();
     void slotWindowRaiseOrLower();

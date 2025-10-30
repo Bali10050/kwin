@@ -48,6 +48,17 @@ struct TabletToolAxisEvent;
 struct PointerAxisEvent;
 struct PointerButtonEvent;
 struct PointerMotionEvent;
+struct PointerSwipeGestureBeginEvent;
+struct PointerSwipeGestureUpdateEvent;
+struct PointerSwipeGestureEndEvent;
+struct PointerSwipeGestureCancelEvent;
+struct PointerPinchGestureBeginEvent;
+struct PointerPinchGestureUpdateEvent;
+struct PointerPinchGestureEndEvent;
+struct PointerPinchGestureCancelEvent;
+struct PointerHoldGestureBeginEvent;
+struct PointerHoldGestureEndEvent;
+struct PointerHoldGestureCancelEvent;
 struct KeyboardKeyEvent;
 struct TabletToolProximityEvent;
 struct TabletToolTipEvent;
@@ -56,6 +67,9 @@ struct TabletPadButtonEvent;
 struct TabletPadStripEvent;
 struct TabletPadRingEvent;
 struct TabletPadDialEvent;
+struct TouchDownEvent;
+struct TouchMotionEvent;
+struct TouchUpEvent;
 
 namespace Decoration
 {
@@ -94,7 +108,6 @@ public:
     void registerTouchpadPinchShortcut(PinchDirection direction, uint32_t fingerCount, QAction *onUp, std::function<void(qreal)> progressCallback = {});
     void registerTouchscreenSwipeShortcut(SwipeDirection direction, uint32_t fingerCount, QAction *action, std::function<void(qreal)> progressCallback = {});
     void forceRegisterTouchscreenSwipeShortcut(SwipeDirection direction, uint32_t fingerCount, QAction *action, std::function<void(qreal)> progressCallback = {});
-    void registerGlobalAccel(KGlobalAccelInterface *interface);
 
     bool supportsPointerWarping() const;
     void warpPointer(const QPointF &pos);
@@ -131,22 +144,13 @@ public:
 
     /**
      * Sends an event through all InputFilters.
-     * The method @p function is invoked on each input filter. Processing is stopped if
-     * a filter returns @c true for @p function.
-     *
-     * The signature of the function should be equivalent to the following:
-     * @code
-     * bool function(const InputEventFilter *spy);
-     * @endcode
-     *
-     * The intended usage is to std::bind the method to invoke on the filter with all arguments
-     * bind.
+     * The method is invoked on each input filter. Processing is stopped if
+     * a filter returns @c true for it
      */
-    template<class UnaryPredicate>
-    void processFilters(UnaryPredicate function)
+    void processFilters(auto method, const auto &...args)
     {
         for (const auto filter : std::as_const(m_filters)) {
-            if (function(filter)) {
+            if ((filter->*method)(args...)) {
                 return;
             }
         }
@@ -154,21 +158,13 @@ public:
 
     /**
      * Sends an event through all input event spies.
-     * The @p function is invoked on each InputEventSpy.
-     *
-     * The UnaryFunction is defined like the UnaryFunction of std::for_each.
-     * The signature of the function should be equivalent to the following:
-     * @code
-     * void function(const InputEventSpy *spy);
-     * @endcode
-     *
-     * The intended usage is to std::bind the method to invoke on the spies with all arguments
-     * bind.
+     * The method is invoked on each InputEventSpy.
      */
-    template<class UnaryFunction>
-    void processSpies(UnaryFunction function)
+    void processSpies(auto method, const auto &...args)
     {
-        std::for_each(m_spies.constBegin(), m_spies.constEnd(), function);
+        for (const auto spy : std::as_const(m_spies)) {
+            (spy->*method)(args...);
+        }
     }
 
     KeyboardInputRedirection *keyboard() const
@@ -193,6 +189,9 @@ public:
      */
     void setLastInputHandler(QObject *device);
     QObject *lastInputHandler() const;
+
+    void setLastInteractionSerial(uint32_t serial);
+    uint32_t lastInteractionSerial() const;
 
     QList<InputDevice *> devices() const;
 
@@ -271,6 +270,7 @@ private:
     TabletInputRedirection *m_tablet;
     TouchInputRedirection *m_touch;
     QObject *m_lastInputDevice = nullptr;
+    uint32_t m_lastInteractionSerial = 0;
 
     GlobalShortcutsManager *m_shortcuts;
 
@@ -304,7 +304,6 @@ private:
 
     std::unique_ptr<InputEventSpy> m_hideCursorSpy;
     std::unique_ptr<InputEventSpy> m_userActivitySpy;
-    std::unique_ptr<InputEventSpy> m_windowInteractedSpy;
 
     LEDs m_leds;
     bool m_hasKeyboard = false;
@@ -405,25 +404,25 @@ public:
      * @return @c true to stop further event processing, @c false to pass to next filter.
      */
     virtual bool keyboardKey(KeyboardKeyEvent *event);
-    virtual bool touchDown(qint32 id, const QPointF &pos, std::chrono::microseconds time);
-    virtual bool touchMotion(qint32 id, const QPointF &pos, std::chrono::microseconds time);
-    virtual bool touchUp(qint32 id, std::chrono::microseconds time);
+    virtual bool touchDown(TouchDownEvent *event);
+    virtual bool touchMotion(TouchMotionEvent *event);
+    virtual bool touchUp(TouchUpEvent *event);
     virtual bool touchCancel();
     virtual bool touchFrame();
 
-    virtual bool pinchGestureBegin(int fingerCount, std::chrono::microseconds time);
-    virtual bool pinchGestureUpdate(qreal scale, qreal angleDelta, const QPointF &delta, std::chrono::microseconds time);
-    virtual bool pinchGestureEnd(std::chrono::microseconds time);
-    virtual bool pinchGestureCancelled(std::chrono::microseconds time);
+    virtual bool pinchGestureBegin(PointerPinchGestureBeginEvent *event);
+    virtual bool pinchGestureUpdate(PointerPinchGestureUpdateEvent *event);
+    virtual bool pinchGestureEnd(PointerPinchGestureEndEvent *event);
+    virtual bool pinchGestureCancelled(PointerPinchGestureCancelEvent *event);
 
-    virtual bool swipeGestureBegin(int fingerCount, std::chrono::microseconds time);
-    virtual bool swipeGestureUpdate(const QPointF &delta, std::chrono::microseconds time);
-    virtual bool swipeGestureEnd(std::chrono::microseconds time);
-    virtual bool swipeGestureCancelled(std::chrono::microseconds time);
+    virtual bool swipeGestureBegin(PointerSwipeGestureBeginEvent *event);
+    virtual bool swipeGestureUpdate(PointerSwipeGestureUpdateEvent *event);
+    virtual bool swipeGestureEnd(PointerSwipeGestureEndEvent *event);
+    virtual bool swipeGestureCancelled(PointerSwipeGestureCancelEvent *event);
 
-    virtual bool holdGestureBegin(int fingerCount, std::chrono::microseconds time);
-    virtual bool holdGestureEnd(std::chrono::microseconds time);
-    virtual bool holdGestureCancelled(std::chrono::microseconds time);
+    virtual bool holdGestureBegin(PointerHoldGestureBeginEvent *event);
+    virtual bool holdGestureEnd(PointerHoldGestureEndEvent *event);
+    virtual bool holdGestureCancelled(PointerHoldGestureCancelEvent *event);
 
     virtual bool switchEvent(SwitchEvent *event);
 

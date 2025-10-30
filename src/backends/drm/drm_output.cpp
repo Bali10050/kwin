@@ -119,25 +119,24 @@ DrmLease *DrmOutput::lease() const
     return m_lease;
 }
 
-bool DrmOutput::shouldDisableCursorPlane() const
+bool DrmOutput::shouldDisableNonPrimaryPlanes() const
 {
     // The kernel rejects async commits that change anything but the primary plane FB_ID
     // This disables the hardware cursor, so it doesn't interfere with that
-    return m_desiredPresentationMode == PresentationMode::Async || m_desiredPresentationMode == PresentationMode::AdaptiveAsync
-        || m_pipeline->amdgpuVrrWorkaroundActive();
+    return m_desiredPresentationMode == PresentationMode::Async || m_desiredPresentationMode == PresentationMode::AdaptiveAsync;
 }
 
-bool DrmOutput::updateCursorLayer(std::optional<std::chrono::nanoseconds> allowedVrrDelay)
+bool DrmOutput::presentAsync(OutputLayer *layer, std::optional<std::chrono::nanoseconds> allowedVrrDelay)
 {
     if (!m_pipeline) {
         // this can happen when the output gets hot-unplugged
         // FIXME fix output lifetimes so that this doesn't happen anymore...
         return false;
     }
-    if (m_pipeline->gpu()->atomicModeSetting() && shouldDisableCursorPlane() && m_pipeline->cursorLayer() && m_pipeline->cursorLayer()->isEnabled()) {
+    if (m_pipeline->gpu()->atomicModeSetting() && shouldDisableNonPrimaryPlanes() && layer->isEnabled()) {
         return false;
     }
-    return m_pipeline->updateCursor(allowedVrrDelay);
+    return m_pipeline->presentAsync(layer, allowedVrrDelay);
 }
 
 QList<std::shared_ptr<OutputMode>> DrmOutput::getModes() const
@@ -195,7 +194,10 @@ bool DrmOutput::setDrmDpmsMode(DpmsMode mode)
             m_renderLoop->uninhibit();
             m_renderLoop->scheduleRepaint();
             // re-set KMS color pipeline stuff
-            tryKmsColorOffloading();
+            State next = m_state;
+            tryKmsColorOffloading(next);
+            maybeScheduleRepaints(next);
+            setState(next);
         } else {
             m_renderLoop->inhibit();
             // with the renderloop inhibited, there won't be a new frame
@@ -291,7 +293,7 @@ Output::Capabilities DrmOutput::computeCapabilities() const
     if (m_state.highDynamicRange || m_state.brightnessDevice || m_state.allowSdrSoftwareBrightness) {
         capabilities |= Capability::BrightnessControl;
     }
-    if (m_connector->edid()->isValid() && m_connector->edid()->colorimetry().has_value()) {
+    if (m_connector->edid()->isValid() && m_connector->edid()->defaultColorimetry().has_value()) {
         capabilities |= Capability::BuiltInColorProfile;
     }
     if (m_state.detectedDdcCi) {
@@ -331,7 +333,47 @@ void DrmOutput::updateDpmsMode(DpmsMode dpmsMode)
     setState(next);
 }
 
-bool DrmOutput::present(const std::shared_ptr<OutputFrame> &frame)
+bool DrmOutput::testPresentation(const std::shared_ptr<OutputFrame> &frame)
+{
+    m_desiredPresentationMode = frame->presentationMode();
+    const auto layers = m_pipeline->layers();
+    const bool nonPrimaryEnabled = std::ranges::any_of(layers, [](OutputLayer *layer) {
+        return layer->isEnabled() && layer->type() != OutputLayerType::Primary;
+    });
+    if (m_gpu->needsModeset()) {
+        // modesets should be done with only the primary plane
+        // as additional planes may mean we can't power all outputs
+        if (nonPrimaryEnabled) {
+            return false;
+        }
+        // the atomic test for the modeset has already been done before
+        // so testing again isn't super useful
+        return true;
+    }
+    m_pipeline->setPresentationMode(frame->presentationMode());
+    if (nonPrimaryEnabled) {
+        // the cursor plane needs to be disabled before we enable tearing; see DrmOutput::presentAsync
+        if (frame->presentationMode() == PresentationMode::AdaptiveAsync) {
+            m_pipeline->setPresentationMode(PresentationMode::AdaptiveSync);
+        } else if (frame->presentationMode() == PresentationMode::Async) {
+            m_pipeline->setPresentationMode(PresentationMode::VSync);
+        }
+    }
+    DrmPipeline::Error err = m_pipeline->testPresent(frame);
+    if (err != DrmPipeline::Error::None && frame->presentationMode() == PresentationMode::AdaptiveAsync) {
+        // tearing can fail in various circumstances, but vrr shouldn't
+        m_pipeline->setPresentationMode(PresentationMode::AdaptiveSync);
+        err = m_pipeline->testPresent(frame);
+    }
+    if (err != DrmPipeline::Error::None && frame->presentationMode() != PresentationMode::VSync) {
+        // retry with the most basic presentation mode
+        m_pipeline->setPresentationMode(PresentationMode::VSync);
+        err = m_pipeline->testPresent(frame);
+    }
+    return err == DrmPipeline::Error::None;
+}
+
+bool DrmOutput::present(const QList<OutputLayer *> &layersToUpdate, const std::shared_ptr<OutputFrame> &frame)
 {
     m_desiredPresentationMode = frame->presentationMode();
     const bool needsModeset = m_gpu->needsModeset();
@@ -343,24 +385,28 @@ bool DrmOutput::present(const std::shared_ptr<OutputFrame> &frame)
         success = true;
     } else {
         m_pipeline->setPresentationMode(frame->presentationMode());
-        if (m_pipeline->cursorLayer()->isEnabled()) {
-            // the cursor plane needs to be disabled before we enable tearing; see DrmOutput::updateCursorLayer
+        const auto layers = m_pipeline->layers();
+        const bool nonPrimaryEnabled = std::ranges::any_of(layers, [](OutputLayer *layer) {
+            return layer->isEnabled() && layer->type() != OutputLayerType::Primary;
+        });
+        if (nonPrimaryEnabled) {
+            // the cursor plane needs to be disabled before we enable tearing; see DrmOutput::presentAsync
             if (frame->presentationMode() == PresentationMode::AdaptiveAsync) {
                 m_pipeline->setPresentationMode(PresentationMode::AdaptiveSync);
             } else if (frame->presentationMode() == PresentationMode::Async) {
                 m_pipeline->setPresentationMode(PresentationMode::VSync);
             }
         }
-        DrmPipeline::Error err = m_pipeline->present(frame);
+        DrmPipeline::Error err = m_pipeline->present(layersToUpdate, frame);
         if (err != DrmPipeline::Error::None && frame->presentationMode() == PresentationMode::AdaptiveAsync) {
             // tearing can fail in various circumstances, but vrr shouldn't
             m_pipeline->setPresentationMode(PresentationMode::AdaptiveSync);
-            err = m_pipeline->present(frame);
+            err = m_pipeline->present(layersToUpdate, frame);
         }
         if (err != DrmPipeline::Error::None && frame->presentationMode() != PresentationMode::VSync) {
             // retry with the most basic presentation mode
             m_pipeline->setPresentationMode(PresentationMode::VSync);
-            err = m_pipeline->present(frame);
+            err = m_pipeline->present(layersToUpdate, frame);
         }
         success = err == DrmPipeline::Error::None;
     }
@@ -368,7 +414,6 @@ bool DrmOutput::present(const std::shared_ptr<OutputFrame> &frame)
     if (!success) {
         return false;
     }
-    Q_EMIT outputChange(frame->damage());
     if (frame->brightness() != m_state.currentBrightness || (frame->artificialHdrHeadroom() && frame->artificialHdrHeadroom() != m_state.artificialHdrHeadroom)) {
         updateBrightness(frame->brightness().value_or(m_state.currentBrightness.value_or(m_state.brightnessSetting)), frame->artificialHdrHeadroom().value_or(m_state.artificialHdrHeadroom));
     }
@@ -380,6 +425,11 @@ void DrmOutput::repairPresentation()
     // read back drm properties, most likely our info is out of date somehow
     // or we need a modeset
     QTimer::singleShot(0, m_gpu->platform(), &DrmBackend::updateOutputs);
+}
+
+bool DrmOutput::overlayLayersLikelyBroken() const
+{
+    return m_gpu->isNVidia();
 }
 
 DrmConnector *DrmOutput::connector() const
@@ -442,34 +492,34 @@ bool DrmOutput::queueChanges(const std::shared_ptr<OutputChangeSet> &props)
     return true;
 }
 
-static QVector3D adaptChannelFactors(const ColorDescription &originalColor, const QVector3D &sRGBchannelFactors)
+static QVector3D adaptChannelFactors(const std::shared_ptr<ColorDescription> &originalColor, const QVector3D &sRGBchannelFactors)
 {
-    QVector3D adaptedChannelFactors = ColorDescription::sRGB.containerColorimetry().relativeColorimetricTo(originalColor.containerColorimetry()) * sRGBchannelFactors;
+    QVector3D adaptedChannelFactors = ColorDescription::sRGB->containerColorimetry().relativeColorimetricTo(originalColor->containerColorimetry()) * sRGBchannelFactors;
     // ensure none of the values reach zero, otherwise the white point might end up on or outside
     // the edges of the gamut, which leads to terrible glitches
-    adaptedChannelFactors.setX(std::max(adaptedChannelFactors.x(), 0.01f));
-    adaptedChannelFactors.setY(std::max(adaptedChannelFactors.y(), 0.01f));
-    adaptedChannelFactors.setZ(std::max(adaptedChannelFactors.z(), 0.01f));
+    adaptedChannelFactors.setX(std::max(adaptedChannelFactors.x(), 0.0001f));
+    adaptedChannelFactors.setY(std::max(adaptedChannelFactors.y(), 0.0001f));
+    adaptedChannelFactors.setZ(std::max(adaptedChannelFactors.z(), 0.0001f));
     return adaptedChannelFactors;
 }
 
-static ColorDescription applyNightLight(const ColorDescription &originalColor, const QVector3D &sRGBchannelFactors)
+static std::shared_ptr<ColorDescription> applyNightLight(const std::shared_ptr<ColorDescription> &originalColor, const QVector3D &sRGBchannelFactors)
 {
     const QVector3D adapted = adaptChannelFactors(originalColor, sRGBchannelFactors);
     // calculate the white point
     // this includes the maximum brightness we can do without clipping any color channel as well
-    const xyY newWhite = XYZ::fromVector(originalColor.containerColorimetry().toXYZ() * adapted).toxyY();
-    return originalColor.withWhitepoint(newWhite).dimmed(newWhite.Y);
+    const xyY newWhite = XYZ::fromVector(originalColor->containerColorimetry().toXYZ() * adapted).toxyY();
+    return originalColor->withWhitepoint(newWhite)->dimmed(newWhite.Y);
 }
 
-ColorDescription DrmOutput::createColorDescription(const State &next) const
+std::shared_ptr<ColorDescription> DrmOutput::createColorDescription(const State &next) const
 {
     const bool effectiveHdr = next.highDynamicRange && (capabilities() & Capability::HighDynamicRange);
     const bool effectiveWcg = next.wideColorGamut && (capabilities() & Capability::WideColorGamut);
     const double brightness = next.currentBrightness.value_or(next.brightnessSetting);
     double maxPossibleArtificialHeadroom = 1.0;
     if (next.brightnessDevice && isInternal() && next.edrPolicy == EdrPolicy::Always) {
-        maxPossibleArtificialHeadroom = 1.0 / next.currentBrightness.value_or(next.brightnessSetting);
+        maxPossibleArtificialHeadroom = std::min(1.0 / next.currentBrightness.value_or(next.brightnessSetting), 3.0);
     }
 
     if (next.colorProfileSource == ColorProfileSource::ICC && !effectiveHdr && !effectiveWcg && next.iccProfile) {
@@ -478,19 +528,19 @@ ColorDescription DrmOutput::createColorDescription(const State &next) const
         const auto sdrColor = Colorimetry::BT709.interpolateGamutTo(next.iccProfile->colorimetry(), next.sdrGamutWideness);
         const double brightnessFactor = (!next.brightnessDevice && next.allowSdrSoftwareBrightness) ? brightness : 1.0;
         const double effectiveReferenceLuminance = 5 + (maxBrightness - 5) * brightnessFactor;
-        return ColorDescription{
+        return std::make_shared<ColorDescription>(ColorDescription{
             next.iccProfile->colorimetry(),
-            TransferFunction(TransferFunction::gamma22, 0, maxBrightness * next.artificialHdrHeadroom),
+            TransferFunction(TransferFunction::gamma22, minBrightness, maxBrightness * next.artificialHdrHeadroom),
             effectiveReferenceLuminance,
             minBrightness * next.artificialHdrHeadroom,
             maxBrightness * maxPossibleArtificialHeadroom,
             maxBrightness * maxPossibleArtificialHeadroom,
             next.iccProfile->colorimetry(),
             sdrColor,
-        };
+        });
     }
 
-    const Colorimetry nativeColorimetry = m_information.edid.colorimetry().value_or(Colorimetry::BT709);
+    const Colorimetry nativeColorimetry = m_information.edid.nativeColorimetry().value_or(Colorimetry::BT709);
     const Colorimetry containerColorimetry = effectiveWcg ? Colorimetry::BT2020 : (next.colorProfileSource == ColorProfileSource::EDID ? nativeColorimetry : Colorimetry::BT709);
     const Colorimetry masteringColorimetry = (effectiveWcg || next.colorProfileSource == ColorProfileSource::EDID) ? nativeColorimetry : Colorimetry::BT709;
     const Colorimetry sdrColorimetry = (effectiveWcg || next.colorProfileSource == ColorProfileSource::EDID) ? Colorimetry::BT709.interpolateGamutTo(nativeColorimetry, next.sdrGamutWideness) : Colorimetry::BT709;
@@ -509,7 +559,7 @@ ColorDescription DrmOutput::createColorDescription(const State &next) const
 
     const double brightnessFactor = (!next.brightnessDevice && next.allowSdrSoftwareBrightness) || effectiveHdr ? brightness : 1.0;
     const double effectiveReferenceLuminance = 5 + (referenceLuminance - 5) * brightnessFactor;
-    return ColorDescription{
+    return std::make_shared<ColorDescription>(ColorDescription{
         containerColorimetry,
         transferFunction,
         effectiveReferenceLuminance,
@@ -518,7 +568,7 @@ ColorDescription DrmOutput::createColorDescription(const State &next) const
         maxPeakBrightness,
         masteringColorimetry,
         sdrColorimetry,
-    };
+    });
 }
 
 void DrmOutput::applyQueuedChanges(const std::shared_ptr<OutputChangeSet> &props)
@@ -571,6 +621,8 @@ void DrmOutput::applyQueuedChanges(const std::shared_ptr<OutputChangeSet> &props
     next.edrPolicy = props->edrPolicy.value_or(m_state.edrPolicy);
     next.originalColorDescription = createColorDescription(next);
     next.colorDescription = applyNightLight(next.originalColorDescription, m_sRgbChannelFactors);
+    tryKmsColorOffloading(next);
+    maybeScheduleRepaints(next);
     setState(next);
 
     // allowSdrSoftwareBrightness, the brightness device or detectedDdcCi might change our capabilities
@@ -583,8 +635,6 @@ void DrmOutput::applyQueuedChanges(const std::shared_ptr<OutputChangeSet> &props
     }
 
     m_renderLoop->setRefreshRate(refreshRate());
-
-    tryKmsColorOffloading();
 
     if (m_state.brightnessDevice && m_state.highDynamicRange && isInternal()) {
         // This is usually not necessary with external monitors, as they default to 100% in HDR mode on their own,
@@ -608,7 +658,7 @@ void DrmOutput::updateBrightness(double newBrightness, double newArtificialHdrHe
 {
     if (m_state.brightnessDevice && !m_state.highDynamicRange) {
         constexpr double minLuminance = 0.04;
-        const double effectiveBrightness = (minLuminance + newBrightness) * m_state.artificialHdrHeadroom - minLuminance;
+        const double effectiveBrightness = (minLuminance + newBrightness) * newArtificialHdrHeadroom - minLuminance;
         m_state.brightnessDevice->setBrightness(effectiveBrightness);
     }
     State next = m_state;
@@ -616,28 +666,14 @@ void DrmOutput::updateBrightness(double newBrightness, double newArtificialHdrHe
     next.artificialHdrHeadroom = newArtificialHdrHeadroom;
     next.originalColorDescription = createColorDescription(next);
     next.colorDescription = applyNightLight(next.originalColorDescription, m_sRgbChannelFactors);
+    tryKmsColorOffloading(next);
+    maybeScheduleRepaints(next);
     setState(next);
-    tryKmsColorOffloading();
 }
 
 void DrmOutput::revertQueuedChanges()
 {
     m_pipeline->revertPendingChanges();
-}
-
-DrmOutputLayer *DrmOutput::primaryLayer() const
-{
-    return m_pipeline->primaryLayer();
-}
-
-DrmOutputLayer *DrmOutput::cursorLayer() const
-{
-    if (!m_pipeline) {
-        // this can happen when the output gets hot-unplugged
-        // FIXME fix output lifetimes so that this doesn't happen anymore...
-        return nullptr;
-    }
-    return m_pipeline->cursorLayer();
 }
 
 bool DrmOutput::setChannelFactors(const QVector3D &rgb)
@@ -646,66 +682,70 @@ bool DrmOutput::setChannelFactors(const QVector3D &rgb)
         m_sRgbChannelFactors = rgb;
         State next = m_state;
         next.colorDescription = applyNightLight(next.originalColorDescription, m_sRgbChannelFactors);
+        tryKmsColorOffloading(next);
         setState(next);
-        tryKmsColorOffloading();
     }
     return true;
 }
 
-void DrmOutput::tryKmsColorOffloading()
+void DrmOutput::tryKmsColorOffloading(State &next)
 {
     constexpr TransferFunction::Type blendingSpace = TransferFunction::gamma22;
-    const double maxLuminance = colorDescription().maxHdrLuminance().value_or(colorDescription().referenceLuminance());
-    setBlendingColorDescription(colorDescription().transferFunction().type == blendingSpace ? colorDescription() : colorDescription().withTransferFunction(TransferFunction(blendingSpace, 0, maxLuminance)));
+    const double maxLuminance = next.colorDescription->maxHdrLuminance().value_or(next.colorDescription->referenceLuminance());
+    if (next.colorDescription->transferFunction().type == blendingSpace) {
+        next.blendingColor = next.colorDescription;
+    } else {
+        next.blendingColor = next.colorDescription->withTransferFunction(TransferFunction(blendingSpace, 0, maxLuminance));
+    }
 
     // we can't use the original color description without modifications
     // as that would un-do any brightness adjustments we did for night light
     // note that we also can't use ColorDescription::dimmed, as we must avoid clipping to this luminance!
-    const ColorDescription encoding = m_state.originalColorDescription.withReference(colorDescription().referenceLuminance());
+    const auto encoding = next.originalColorDescription->withReference(next.colorDescription->referenceLuminance());
 
     // absolute colorimetric to preserve the whitepoint adjustments made during compositing
-    ColorPipeline colorPipeline = ColorPipeline::create(m_blendingColorDescription, encoding, RenderingIntent::AbsoluteColorimetric);
+    ColorPipeline colorPipeline = ColorPipeline::create(next.blendingColor, encoding, RenderingIntent::AbsoluteColorimetricNoAdaptation);
 
-    const bool hdr = m_state.highDynamicRange && (capabilities() & Capability::HighDynamicRange);
-    const bool wcg = m_state.wideColorGamut && (capabilities() & Capability::WideColorGamut);
-    const bool usesICC = m_state.colorProfileSource == ColorProfileSource::ICC && m_state.iccProfile && !hdr && !wcg;
-    if (colorPowerTradeoff() == ColorPowerTradeoff::PreferAccuracy) {
-        setScanoutColorDescription(encoding);
+    const bool hdr = next.highDynamicRange && (capabilities() & Capability::HighDynamicRange);
+    const bool wcg = next.wideColorGamut && (capabilities() & Capability::WideColorGamut);
+    const bool usesICC = next.colorProfileSource == ColorProfileSource::ICC && next.iccProfile && !hdr && !wcg;
+    if (next.colorPowerTradeoff == ColorPowerTradeoff::PreferAccuracy) {
+        next.layerBlendingColor = encoding;
         m_pipeline->setCrtcColorPipeline(ColorPipeline{});
         m_pipeline->applyPendingChanges();
         m_needsShadowBuffer = usesICC
-            || colorDescription().transferFunction().type != blendingSpace
+            || next.colorDescription->transferFunction().type != blendingSpace
             || !colorPipeline.isIdentity();
         return;
     }
-    if (!m_pipeline->activePending() || !primaryLayer()) {
+    if (!m_pipeline->activePending() || m_pipeline->layers().empty()) {
         return;
     }
     if (usesICC) {
-        colorPipeline.addTransferFunction(encoding.transferFunction());
-        colorPipeline.addMultiplier(1.0 / encoding.transferFunction().maxLuminance);
-        colorPipeline.add1DLUT(m_state.iccProfile->inverseTransferFunction());
-        if (m_state.iccProfile->vcgt()) {
-            colorPipeline.add1DLUT(m_state.iccProfile->vcgt());
+        colorPipeline.addTransferFunction(encoding->transferFunction(), ColorspaceType::LinearRGB);
+        colorPipeline.addMultiplier(1.0 / encoding->transferFunction().maxLuminance);
+        colorPipeline.add1DLUT(next.iccProfile->inverseTransferFunction(), ColorspaceType::NonLinearRGB);
+        if (next.iccProfile->vcgt()) {
+            colorPipeline.add1DLUT(next.iccProfile->vcgt(), ColorspaceType::NonLinearRGB);
         }
     }
     m_pipeline->setCrtcColorPipeline(colorPipeline);
     if (DrmPipeline::commitPipelines({m_pipeline}, DrmPipeline::CommitMode::Test) == DrmPipeline::Error::None) {
         m_pipeline->applyPendingChanges();
-        setScanoutColorDescription(m_blendingColorDescription);
+        next.layerBlendingColor = next.blendingColor;
         m_needsShadowBuffer = false;
         return;
     }
-    if (colorDescription().transferFunction().type == blendingSpace && !usesICC) {
+    if (next.colorDescription->transferFunction().type == blendingSpace && !usesICC) {
         // Allow falling back to applying night light in non-linear space.
         // This isn't technically correct, but the difference is quite small and not worth
         // losing a lot of performance and battery life over
-        ColorPipeline simplerPipeline;
-        simplerPipeline.addMatrix(m_blendingColorDescription.toOther(encoding, RenderingIntent::AbsoluteColorimetric), colorPipeline.currentOutputRange());
-        m_pipeline->setCrtcColorPipeline(colorPipeline);
+        ColorPipeline simplerPipeline(ValueRange{0, 1}, ColorspaceType::NonLinearRGB);
+        simplerPipeline.addMatrix(next.blendingColor->toOther(*encoding, RenderingIntent::AbsoluteColorimetricNoAdaptation), colorPipeline.currentOutputRange(), ColorspaceType::NonLinearRGB);
+        m_pipeline->setCrtcColorPipeline(simplerPipeline);
         if (DrmPipeline::commitPipelines({m_pipeline}, DrmPipeline::CommitMode::Test) == DrmPipeline::Error::None) {
             m_pipeline->applyPendingChanges();
-            setScanoutColorDescription(m_blendingColorDescription);
+            next.layerBlendingColor = next.blendingColor;
             m_needsShadowBuffer = false;
             return;
         }
@@ -713,34 +753,19 @@ void DrmOutput::tryKmsColorOffloading()
     // fall back to using a shadow buffer for doing blending in gamma 2.2 and/or night light
     m_pipeline->setCrtcColorPipeline(ColorPipeline{});
     m_pipeline->applyPendingChanges();
-    setScanoutColorDescription(encoding);
+    next.layerBlendingColor = encoding;
     m_needsShadowBuffer = usesICC
-        || colorDescription().transferFunction().type != blendingSpace
+        || next.colorDescription->transferFunction().type != blendingSpace
         || !colorPipeline.isIdentity();
 }
 
-void DrmOutput::setScanoutColorDescription(const ColorDescription &description)
+void DrmOutput::maybeScheduleRepaints(const State &next)
 {
-    if (m_scanoutColorDescription != description) {
-        m_scanoutColorDescription = description;
-        if (primaryLayer()) {
-            primaryLayer()->addRepaint(infiniteRegion());
-        }
-        if (cursorLayer()) {
-            cursorLayer()->addRepaint(infiniteRegion());
-        }
-    }
-}
-
-void DrmOutput::setBlendingColorDescription(const ColorDescription &description)
-{
-    if (m_blendingColorDescription != description) {
-        m_blendingColorDescription = description;
-        if (primaryLayer()) {
-            primaryLayer()->addRepaint(infiniteRegion());
-        }
-        if (cursorLayer()) {
-            cursorLayer()->addRepaint(infiniteRegion());
+    // TODO move the output layers to Output, and have it take care of this when updating State
+    if (next.blendingColor != m_state.blendingColor || next.layerBlendingColor != m_state.layerBlendingColor) {
+        const auto layers = m_pipeline->layers();
+        for (const auto &layer : layers) {
+            layer->addRepaint(infiniteRegion());
         }
     }
 }
@@ -748,16 +773,6 @@ void DrmOutput::setBlendingColorDescription(const ColorDescription &description)
 bool DrmOutput::needsShadowBuffer() const
 {
     return m_needsShadowBuffer;
-}
-
-const ColorDescription &DrmOutput::scanoutColorDescription() const
-{
-    return m_scanoutColorDescription;
-}
-
-const ColorDescription &DrmOutput::blendingColorDescription() const
-{
-    return m_blendingColorDescription;
 }
 
 void DrmOutput::removePipeline()

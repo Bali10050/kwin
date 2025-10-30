@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "core/outputlayer.h"
 #include "screencastsource.h"
 
 #include <QPointer>
@@ -14,6 +15,10 @@ namespace KWin
 {
 
 class Output;
+class SceneView;
+class ItemTreeView;
+class EglContext;
+class ScreencastLayer;
 
 class OutputScreenCastSource : public ScreenCastSource
 {
@@ -28,8 +33,9 @@ public:
     qreal devicePixelRatio() const override;
     quint32 drmFormat() const override;
 
-    void render(GLFramebuffer *target) override;
-    void render(QImage *target) override;
+    void setRenderCursor(bool enable) override;
+    QRegion render(GLFramebuffer *target, const QRegion &bufferRepair) override;
+    QRegion render(QImage *target, const QRegion &bufferRepair) override;
     std::chrono::nanoseconds clock() const override;
 
     void resume() override;
@@ -41,9 +47,11 @@ public:
     QRectF mapFromGlobal(const QRectF &rect) const override;
 
 private:
-    void report(const QRegion &damage);
-
+    void updateView();
     QPointer<Output> m_output;
+    std::unique_ptr<ScreencastLayer> m_layer;
+    std::unique_ptr<SceneView> m_sceneView;
+    std::unique_ptr<ItemTreeView> m_cursorView;
     bool m_active = false;
 };
 

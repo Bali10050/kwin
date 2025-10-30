@@ -23,7 +23,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=6; plural=n==0 ? 0 : n==1 ? 1 : n==2 ? 2 : n%100>=3 "
-"&& n%100<=10 ? 3 : n%100>=11 && n%100<=99 ? 4 : 5;\n"
+"&& n%100<=10 ? 3 : n%100>=11 ? 4 : 5;\n"
 "X-Generator: Lokalize 23.08.5\n"
 
 #: declarative-plugin/buttonsmodel.cpp:55
@@ -90,7 +90,7 @@ msgid ""
 "available, or which is already set."
 msgstr ""
 "تتيح لك هذه الأداة ضبط سمة زخارف النوافذ لجلسة البلازما الحالية، دون تعينها "
-"عن طريق الخطأ لسمة إما غير متوفرة ، أو عينت بالفعل."
+"عن طريق الخطأ لسمة إما غير متوفرة، أو عينت فعلًا."
 
 #: kwin-applywindowdecoration.cpp:33
 #, kde-format
@@ -100,7 +100,7 @@ msgid ""
 "that if one can be deduced."
 msgstr ""
 "اسم سمة زخرفة النافذة التي ترغب في تعيينها لـكوين. عند تقديم مسار كامل "
-"سيحاول العثور على سمة في ذاك الدليل ، ثم تطبيق ذلك إذا وجدها."
+"سيحاول العثور على سمة في ذاك الدليل، ثم تطبيق ذلك إذا وجدها."
 
 #: kwin-applywindowdecoration.cpp:34
 #, kde-format
@@ -121,14 +121,14 @@ msgid ""
 "You attempted to pass a file path, but this could not be resolved to a "
 "theme, and we will have to abort, due to having no theme to set"
 msgstr ""
-"لقد حاولت تمرير مسار ملف ، ولكن لا يمكن حل هذا إلى سمة ، وسيتعين علينا إحباط "
-"ذلك ، نظرًا لعدم وجود سمة لتعيينها"
+"لقد حاولت تمرير مسار ملف، ولكن لا يمكن حل هذا إلى سمة، وسيتعين علينا إحباط "
+"ذلك، نظرًا لعدم وجود سمة لتعيينها"
 
 #: kwin-applywindowdecoration.cpp:77
 #, kde-format
 msgid ""
 "The requested theme \"%1\" is already set as the window decoration theme."
-msgstr "عينت السمة المطلوبة \"%1\" بالفعل كسمة لجلسة البلازما الحالية."
+msgstr "عينت السمة المطلوبة \"%1\" فعلًا كسمة لجلسة البلازما الحالية."
 
 #: kwin-applywindowdecoration.cpp:99
 #, kde-format
@@ -141,7 +141,7 @@ msgid ""
 "Failed to save your theme settings - the reason is unknown, but this is an "
 "unrecoverable error. You may find that simply trying again will work."
 msgstr ""
-"فشل في حفظ إعدادات السمة - السبب غير معروف ، لكن هذا خطأ لا يمكن إصلاحه. قد "
+"فشل في حفظ إعدادات السمة - السبب غير معروف، لكن هذا خطأ لا يمكن إصلاحه. قد "
 "تجد أن مجرد المحاولة مرة أخرى ستنجح."
 
 #: kwin-applywindowdecoration.cpp:107

@@ -15,6 +15,7 @@
 #include "ui_advanced.h"
 #include "ui_focus.h"
 #include "ui_moving.h"
+#include "ui_pip.h"
 
 class QRadioButton;
 class QCheckBox;
@@ -54,11 +55,19 @@ public:
     explicit KWinAdvancedConfigForm(QWidget *parent);
 };
 
+class KWinPipConfigForm : public QWidget, public Ui::KWinPipConfigForm
+{
+    Q_OBJECT
+
+public:
+    explicit KWinPipConfigForm(QWidget *parent);
+};
+
 class KFocusConfig : public KCModule
 {
     Q_OBJECT
 public:
-    KFocusConfig(bool _standAlone, KWinOptionsSettings *settings, QWidget *parent);
+    KFocusConfig(KWinOptionsSettings *settings, QWidget *parent);
 
     void load() override;
     void save() override;
@@ -73,8 +82,6 @@ private Q_SLOTS:
     void updateDefaultIndicator();
 
 private:
-    bool standAlone;
-
     KWinFocusConfigForm *m_ui;
     KWinOptionsSettings *m_settings;
 
@@ -85,16 +92,13 @@ class KMovingConfig : public KCModule
 {
     Q_OBJECT
 public:
-    KMovingConfig(bool _standAlone, KWinOptionsSettings *settings, QWidget *parent);
-
-    void save() override;
+    KMovingConfig(KWinOptionsSettings *settings, QWidget *parent);
 
 protected:
     void initialize(KWinOptionsSettings *settings);
 
 private:
     KWinOptionsSettings *m_settings;
-    bool standAlone;
     KWinMovingConfigForm *m_ui;
 };
 
@@ -102,15 +106,27 @@ class KAdvancedConfig : public KCModule
 {
     Q_OBJECT
 public:
-    KAdvancedConfig(bool _standAlone, KWinOptionsSettings *settings, KWinOptionsKDEGlobalsSettings *globalSettings, QWidget *parent);
-
-    void save() override;
+    KAdvancedConfig(KWinOptionsSettings *settings, KWinOptionsKDEGlobalsSettings *globalSettings, QWidget *parent);
 
 protected:
     void initialize(KWinOptionsSettings *settings, KWinOptionsKDEGlobalsSettings *globalSettings);
 
 private:
-    bool standAlone;
     KWinAdvancedConfigForm *m_ui;
     KWinOptionsSettings *m_settings;
+};
+
+class KPipConfig : public KCModule
+{
+    Q_OBJECT
+
+public:
+    KPipConfig(KWinOptionsSettings *settings, QWidget *parent);
+
+protected:
+    void initialize(KWinOptionsSettings *settings);
+
+private:
+    KWinOptionsSettings *m_settings;
+    KWinPipConfigForm *m_ui;
 };

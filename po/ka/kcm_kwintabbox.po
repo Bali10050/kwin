@@ -7,8 +7,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kwin\n"
 "Report-Msgid-Bugs-To: https://bugs.kde.org\n"
-"POT-Creation-Date: 2025-04-19 00:43+0000\n"
-"PO-Revision-Date: 2025-04-19 04:28+0200\n"
+"POT-Creation-Date: 2025-09-23 00:44+0000\n"
+"PO-Revision-Date: 2025-09-23 03:58+0200\n"
 "Last-Translator: Temuri Doghonadze <temuri.doghonadze@gmail.com>\n"
 "Language-Team: Georgian <kde-i18n-doc@kde.org>\n"
 "Language: ka\n"
@@ -16,53 +16,53 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"X-Generator: Poedit 3.5\n"
+"X-Generator: Poedit 3.7\n"
 
-#: layoutpreview.cpp:27
+#: layoutpreview.cpp:28
 #, kde-format
 msgid "Launch an interactive preview for a tabbox switcher"
 msgstr "ინტერაქტიული მინიატურის გაშვება ჩანართების გადამრთველისთვის"
 
-#: layoutpreview.cpp:28
+#: layoutpreview.cpp:29
 #, kde-format
 msgid "Path to the Window Switcher QML main file"
 msgstr "ბილიკი Window Switcher QML-ის მთავარ ფაილამდე"
 
-#: layoutpreview.cpp:29
+#: layoutpreview.cpp:30
 #, kde-format
 msgid "Show also a thumbnail for the desktop"
 msgstr "ასევე ნაჩვენები იქნება მინიატურა სამუშაო მაგიდისთვის"
 
-#: layoutpreview.cpp:156
+#: layoutpreview.cpp:159
 #, kde-format
 msgctxt "The name of KDE's file manager in this language, if translated"
 msgid "Dolphin"
 msgstr "Dolphin"
 
-#: layoutpreview.cpp:160
+#: layoutpreview.cpp:163
 #, kde-format
 msgctxt "The name of KDE's web browser in this language, if translated"
 msgid "Konqueror"
 msgstr "Konqueror"
 
-#: layoutpreview.cpp:164
+#: layoutpreview.cpp:167
 #, kde-format
 msgctxt "The name of KDE's email client in this language, if translated"
 msgid "KMail"
 msgstr "KMail"
 
-#: layoutpreview.cpp:168
+#: layoutpreview.cpp:171
 #, kde-format
 msgctxt "The name of KDE's System Settings app in this language, if translated"
 msgid "System Settings"
 msgstr "სისტემის მორგება"
 
-#: layoutpreview.cpp:174
+#: layoutpreview.cpp:177
 #, kde-format
-msgid "Show Desktop"
-msgstr "სამუშაო მაგიდის ჩვენება"
+msgid "Peek at Desktop"
+msgstr "სამუშაო მაგიდაზე გაჭვრეტა"
 
-#: layoutpreview.cpp:204
+#: layoutpreview.cpp:207
 #, kde-format
 msgctxt "An example Desktop Name"
 msgid "Desktop 1"
@@ -99,8 +99,8 @@ msgstr "შემცველობა"
 #. i18n: ectx: property (text), widget (QCheckBox, showDesktop)
 #: main.ui:41
 #, kde-format
-msgid "Include \"Show Desktop\" entry"
-msgstr "\"სამუშაო მაგიდის ჩვენების\" ელემენტის ჩასმა"
+msgid "Include \"Peek at Desktop\" entry"
+msgstr "\"სამუშაო მაგიდაზე გაჭვრეტის\" ელემენტის ჩასმა"
 
 #. i18n: ectx: property (text), item, widget (QComboBox, switchingModeCombo)
 #: main.ui:55
@@ -318,6 +318,9 @@ msgstr "მიმდინარე აპლიკაციის ფანჯ�
 #, kde-format
 msgid "Walk Through Windows of Current Application Alternative (Reverse)"
 msgstr "მიმდინარე აპლიკაციის ფანჯრებში ალტერნატიული გავლა (პირიქით)"
+
+#~ msgid "Show Desktop"
+#~ msgstr "სამუშაო მაგიდის ჩვენება"
 
 #~ msgid "KWin"
 #~ msgstr "KWin"

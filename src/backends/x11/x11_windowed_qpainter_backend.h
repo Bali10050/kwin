@@ -38,6 +38,7 @@ public:
     bool doEndFrame(const QRegion &renderedRegion, const QRegion &damagedRegion, OutputFrame *frame) override;
     DrmDevice *scanoutDevice() const override;
     QHash<uint32_t, QList<uint64_t>> supportedDrmFormats() const override;
+    void releaseBuffers() override;
 
 private:
     X11WindowedOutput *const m_output;
@@ -58,6 +59,7 @@ public:
     bool doEndFrame(const QRegion &renderedRegion, const QRegion &damagedRegion, OutputFrame *frame) override;
     DrmDevice *scanoutDevice() const override;
     QHash<uint32_t, QList<uint64_t>> supportedDrmFormats() const override;
+    void releaseBuffers() override;
 
 private:
     QImage m_buffer;
@@ -74,22 +76,13 @@ public:
 
     GraphicsBufferAllocator *graphicsBufferAllocator() const;
 
-    OutputLayer *primaryLayer(Output *output) override;
-    OutputLayer *cursorLayer(Output *output) override;
+    QList<OutputLayer *> compatibleOutputLayers(Output *output) override;
 
 private:
     void addOutput(Output *output);
-    void removeOutput(Output *output);
-
-    struct Layers
-    {
-        std::unique_ptr<X11WindowedQPainterPrimaryLayer> primaryLayer;
-        std::unique_ptr<X11WindowedQPainterCursorLayer> cursorLayer;
-    };
 
     X11WindowedBackend *m_backend;
     std::unique_ptr<GraphicsBufferAllocator> m_allocator;
-    std::map<Output *, Layers> m_outputs;
 };
 
 } // namespace KWin

@@ -10,6 +10,8 @@
 
 #include "core/outputlayer.h"
 #include "opengl/eglbackend.h"
+#include "utils/damagejournal.h"
+
 #include <chrono>
 #include <memory>
 
@@ -25,23 +27,27 @@ class GLTexture;
 class VirtualEglBackend;
 class GLRenderTimeQuery;
 
-class VirtualEglLayer : public OutputLayer
+class KWIN_EXPORT VirtualEglLayer : public OutputLayer
 {
 public:
     VirtualEglLayer(Output *output, VirtualEglBackend *backend);
+    ~VirtualEglLayer() override;
 
     std::optional<OutputLayerBeginFrameInfo> doBeginFrame() override;
     bool doEndFrame(const QRegion &renderedRegion, const QRegion &damagedRegion, OutputFrame *frame) override;
 
-    std::shared_ptr<GLTexture> texture() const;
     DrmDevice *scanoutDevice() const override;
     QHash<uint32_t, QList<uint64_t>> supportedDrmFormats() const override;
+    void releaseBuffers() override;
+
+    GLTexture *texture() const;
 
 private:
     VirtualEglBackend *const m_backend;
     std::shared_ptr<EglSwapchain> m_swapchain;
     std::shared_ptr<EglSwapchainSlot> m_current;
     std::unique_ptr<GLRenderTimeQuery> m_query;
+    DamageJournal m_damageJournal;
 };
 
 /**
@@ -54,8 +60,7 @@ class VirtualEglBackend : public EglBackend
 public:
     VirtualEglBackend(VirtualBackend *b);
     ~VirtualEglBackend() override;
-    std::pair<std::shared_ptr<KWin::GLTexture>, ColorDescription> textureForOutput(Output *output) const override;
-    OutputLayer *primaryLayer(Output *output) override;
+    QList<OutputLayer *> compatibleOutputLayers(Output *output) override;
     void init() override;
 
     VirtualBackend *backend() const;
@@ -66,10 +71,8 @@ private:
     bool initRenderingContext();
 
     void addOutput(Output *output);
-    void removeOutput(Output *output);
 
     VirtualBackend *m_backend;
-    std::map<Output *, std::unique_ptr<VirtualEglLayer>> m_outputs;
 };
 
 } // namespace KWin

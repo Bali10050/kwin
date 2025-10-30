@@ -32,7 +32,7 @@ add_executable(testWaylandSeat)
 set( testWaylandSeat_SRCS
         test_wayland_seat.cpp
     )
-qt6_generate_wayland_protocol_client_sources(testWaylandSeat 
+qt6_generate_wayland_protocol_client_sources(testWaylandSeat
     ${private_code_option}
     FILES
         ${WaylandProtocols_DATADIR}/unstable/pointer-gestures/pointer-gestures-unstable-v1.xml
@@ -120,24 +120,13 @@ add_test(NAME kwayland-testDataSource COMMAND testDataSource)
 ecm_mark_as_test(testDataSource)
 
 ########################################################
-# Test DataDevice
-########################################################
-set( testDataDevice_SRCS
-        test_datadevice.cpp
-    )
-add_executable(testDataDevice ${testDataDevice_SRCS})
-target_link_libraries( testDataDevice Qt::Test Qt::Gui Plasma::KWaylandClient kwin Wayland::Client)
-add_test(NAME kwayland-testDataDevice COMMAND testDataDevice)
-ecm_mark_as_test(testDataDevice)
-
-########################################################
 # Test ServerSideDecoration
 ########################################################
 set( testServerSideDecoration_SRCS
         test_server_side_decoration.cpp
     )
 add_executable(testServerSideDecoration ${testServerSideDecoration_SRCS})
-qt6_generate_wayland_protocol_client_sources(testServerSideDecoration 
+qt6_generate_wayland_protocol_client_sources(testServerSideDecoration
     ${private_code_option}
     FILES
         ${PLASMA_WAYLAND_PROTOCOLS_DIR}/server-decoration.xml
@@ -145,17 +134,6 @@ qt6_generate_wayland_protocol_client_sources(testServerSideDecoration
 target_link_libraries( testServerSideDecoration Qt::Test Qt::Gui Plasma::KWaylandClient kwin Wayland::Client)
 add_test(NAME kwayland-testServerSideDecoration COMMAND testServerSideDecoration)
 ecm_mark_as_test(testServerSideDecoration)
-
-########################################################
-# Test Drag'N'Drop
-########################################################
-set( testDragAndDrop_SRCS
-        test_drag_drop.cpp
-    )
-add_executable(testDragAndDrop ${testDragAndDrop_SRCS})
-target_link_libraries( testDragAndDrop Qt::Test Qt::Gui Plasma::KWaylandClient kwin Wayland::Client)
-add_test(NAME kwayland-testDragAndDrop COMMAND testDragAndDrop)
-ecm_mark_as_test(testDragAndDrop)
 
 ########################################################
 # Test PlasmaShell
@@ -200,17 +178,6 @@ add_executable(testError ${testError_SRCS})
 target_link_libraries( testError Qt::Test Qt::Gui Plasma::KWaylandClient kwin Wayland::Client)
 add_test(NAME kwayland-testError COMMAND testError)
 ecm_mark_as_test(testError)
-
-########################################################
-# Test Selection
-########################################################
-set( testSelection_SRCS
-        test_selection.cpp
-    )
-add_executable(testSelection ${testSelection_SRCS})
-target_link_libraries( testSelection Qt::Test Qt::Gui Plasma::KWaylandClient kwin Wayland::Client)
-add_test(NAME kwayland-testSelection COMMAND testSelection)
-ecm_mark_as_test(testSelection)
 
 ########################################################
 # Test XdgForeign

@@ -331,6 +331,10 @@ void EisContext::handleEvents()
             const auto id = eis_event_touch_get_id(event);
             qCDebug(KWIN_EIS) << device->name() << "touch up" << id;
             std::erase(device->activeTouches, id);
+            if (eis_event_touch_get_is_cancel(event)) {
+                Q_EMIT device->touchCanceled(device);
+                break;
+            }
             Q_EMIT device->touchUp(id, currentTime(), device);
             break;
         }
@@ -343,6 +347,9 @@ void EisContext::handleEvents()
             Q_EMIT device->touchMotion(id, {x, y}, currentTime(), device);
             break;
         }
+        case EIS_EVENT_PONG:
+        case EIS_EVENT_SYNC:
+            break;
         }
         eis_event_unref(event);
     }

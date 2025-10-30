@@ -170,9 +170,14 @@ class KWIN_EXPORT Device : public InputDevice
     Q_PROPERTY(QString defaultPressureCurve READ defaultPressureCurve CONSTANT)
     Q_PROPERTY(QString pressureCurve READ serializedPressureCurve WRITE setPressureCurve NOTIFY pressureCurveChanged)
     Q_PROPERTY(quint32 tabletPadButtonCount READ tabletPadButtonCount CONSTANT)
+    Q_PROPERTY(quint32 tabletPadDialCount READ tabletPadDialCount CONSTANT)
+    Q_PROPERTY(quint32 tabletPadRingCount READ tabletPadRingCount CONSTANT)
+    Q_PROPERTY(quint32 tabletPadStripCount READ tabletPadStripCount CONSTANT)
     Q_PROPERTY(bool supportsInputArea READ supportsInputArea CONSTANT)
     Q_PROPERTY(QRectF defaultInputArea READ defaultInputArea CONSTANT)
     Q_PROPERTY(QRectF inputArea READ inputArea WRITE setInputArea NOTIFY inputAreaChanged)
+    Q_PROPERTY(QList<unsigned int> numModes READ numModes CONSTANT)
+    Q_PROPERTY(QList<unsigned int> currentModes READ currentModes NOTIFY currentModesChanged)
 
     Q_PROPERTY(bool supportsPressureRange READ supportsPressureRange NOTIFY supportsPressureRangeChanged)
     Q_PROPERTY(double pressureRangeMin READ pressureRangeMin WRITE setPressureRangeMin NOTIFY pressureRangeMinChanged)
@@ -185,6 +190,7 @@ class KWIN_EXPORT Device : public InputDevice
     /// rotation angle, as 0 to 360 degrees
     Q_PROPERTY(uint32_t rotation READ rotation WRITE setRotation NOTIFY rotationChanged)
     Q_PROPERTY(uint32_t defaultRotation READ defaultRotation CONSTANT)
+    Q_PROPERTY(bool isVirtual READ isVirtual CONSTANT)
 
 public:
     explicit Device(libinput_device *device, QObject *parent = nullptr);
@@ -243,6 +249,10 @@ public:
     QString outputName() const override
     {
         return m_outputName;
+    }
+    QString outputUuid() const
+    {
+        return m_outputUuid;
     }
     QSizeF size() const
     {
@@ -662,12 +672,23 @@ public:
     }
 
     /**
-     * Used to deserialize monitor data from KConfig when initializing a device
+     * Sets the output name, and if a matching output is found,
+     * also the UUID of that output
      */
-    void setOutputName(const QString &uuid) override;
+    void setOutputName(const QString &name) override;
+    /**
+     * Only sets the output name, for config loading purposes
+     */
+    void setConfigOutputName(const QString &name);
     QString defaultOutputName() const
     {
         return {};
+    }
+
+    void setOutputUuid(const QString &uuid);
+    QString defaultOutputUuid() const
+    {
+        return QString();
     }
 
     /**
@@ -691,6 +712,9 @@ public:
     }
 
     int tabletPadButtonCount() const override;
+    int tabletPadDialCount() const override;
+    int tabletPadRingCount() const override;
+    int tabletPadStripCount() const override;
     QList<InputDeviceTabletPadModeGroup> modeGroups() const override;
 
     Output *output() const;
@@ -747,10 +771,14 @@ public:
         return defaultValue("TabletToolRelativeMode", false);
     }
 
+    QList<unsigned int> numModes() const;
+    QList<unsigned int> currentModes() const;
+
     bool supportsRotation() const;
     uint32_t rotation() const;
     void setRotation(uint32_t degrees_cw);
     uint32_t defaultRotation() const;
+    bool isVirtual() const;
 
     /**
      * Gets the Device for @p native. @c null if there is no Device for @p native.
@@ -786,6 +814,7 @@ Q_SIGNALS:
     void inputAreaChanged();
     void tabletToolRelativeChanged();
     void rotationChanged();
+    void currentModesChanged();
 
 private:
     template<typename T>
@@ -817,6 +846,7 @@ private:
     QString m_sysName;
     QString m_sysPath;
     QString m_outputName;
+    QString m_outputUuid;
     QSizeF m_size;
     quint32 m_product;
     quint32 m_vendor;
@@ -890,6 +920,8 @@ private:
 
     QRectF m_inputArea;
     bool m_tabletToolIsRelative = false;
+    QList<unsigned int> m_currentModes;
+    bool m_isVirtual = false;
 };
 
 }

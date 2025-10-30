@@ -66,7 +66,7 @@ class KWIN_EXPORT TabletSurfaceCursorV2 : public QObject
     Q_OBJECT
 public:
     ~TabletSurfaceCursorV2() override;
-    QPoint hotspot() const;
+    QPointF hotspot() const;
     quint32 enteredSerial() const;
     SurfaceInterface *surface() const;
 
@@ -109,6 +109,8 @@ public:
         Wheel = 6, ///< Wheel axis
     };
     Q_ENUM(Capability)
+
+    InputDeviceTabletTool *device() const;
 
     bool hasCapability(Capability capability) const;
 
@@ -155,7 +157,8 @@ private:
                                    quint32 hsl,
                                    quint32 hih,
                                    quint32 hil,
-                                   const QList<Capability> &capability);
+                                   const QList<Capability> &capability,
+                                   InputDeviceTabletTool *device);
     std::unique_ptr<TabletToolV2InterfacePrivate> d;
 };
 
@@ -238,7 +241,7 @@ class KWIN_EXPORT TabletPadDialV2Interface : public QObject
 public:
     virtual ~TabletPadDialV2Interface();
 
-    void sendDelta(qreal delta);
+    void sendDelta(qint32 delta);
     void sendFrame(quint32 time);
 
 private:
@@ -309,6 +312,7 @@ public:
     bool isClientSupported(ClientConnection *client) const;
 
     bool hasImplicitGrab(quint32 serial) const;
+    TabletToolV2Interface *toolByImplicitGrabSerial(quint32 serial) const;
 
 private:
     friend class TabletManagerV2InterfacePrivate;

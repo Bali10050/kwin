@@ -36,9 +36,9 @@ namespace KWin
 
 class Window;
 class Output;
-class GestureRecognizer;
+class ScreenEdgeGestureRecognizer;
 class ScreenEdges;
-class SwipeGesture;
+class ScreenEdgeGesture;
 
 class TouchCallback
 {
@@ -88,6 +88,7 @@ public:
     Output *output() const;
     const QRect &geometry() const;
     void setTouchAction(ElectricBorderAction action);
+    void checkBlocking();
 
     bool activatesForPointer() const;
     bool activatesForTouchGesture() const;
@@ -100,7 +101,6 @@ public Q_SLOTS:
     void setAction(ElectricBorderAction action);
     void setGeometry(const QRect &geometry);
     void updateApproaching(const QPointF &point);
-    void checkBlocking();
 Q_SIGNALS:
     void approaching(ElectricBorder border, qreal factor, const QRect &geometry);
     void activatesForTouchGestureChanged();
@@ -150,7 +150,7 @@ private:
     bool m_pushBackBlocked;
     Window *m_client;
     Output *m_output;
-    std::unique_ptr<SwipeGesture> m_gesture;
+    std::unique_ptr<ScreenEdgeGesture> m_gesture;
     QList<TouchCallback> m_touchCallbacks;
     friend class ScreenEdges;
 };
@@ -213,6 +213,7 @@ class KWIN_EXPORT ScreenEdges : public QObject
     Q_PROPERTY(int actionLeft READ actionLeft)
 public:
     explicit ScreenEdges();
+    ~ScreenEdges() override;
     /**
      * @internal
      */
@@ -297,7 +298,7 @@ public:
      * @param o Qt orientations
      */
     void reserveDesktopSwitching(bool isToReserve, Qt::Orientations o);
-    bool isEntered(const QPointF &pos, std::chrono::microseconds timestamp);
+    void handlePointerMotion(const QPointF &pos, std::chrono::microseconds timestamp);
 
     bool isDesktopSwitching() const;
     bool isDesktopSwitchingMovingClients() const;
@@ -321,13 +322,12 @@ public:
 
     ElectricBorderAction actionForTouchBorder(ElectricBorder border) const;
 
-    GestureRecognizer *gestureRecognizer() const
-    {
-        return m_gestureRecognizer;
-    }
+    ScreenEdgeGestureRecognizer *gestureRecognizer() const;
 
     bool remainActiveOnFullscreen() const;
     const std::vector<std::unique_ptr<Edge>> &edges() const;
+
+    void checkBlocking();
 
 public Q_SLOTS:
     void reconfigure();
@@ -348,7 +348,6 @@ Q_SIGNALS:
      * @c 0.0 meaning far away from the border, @c 1.0 in trigger distance.
      */
     void approaching(ElectricBorder border, qreal factor, const QRect &geometry);
-    void checkBlocking();
 
 private:
     enum {
@@ -389,7 +388,7 @@ private:
     ElectricBorderAction m_actionLeft;
     QMap<ElectricBorder, ElectricBorderAction> m_touchCallbacks;
     const int m_cornerOffset;
-    GestureRecognizer *m_gestureRecognizer;
+    std::unique_ptr<ScreenEdgeGestureRecognizer> m_gestureRecognizer;
     bool m_remainActiveOnFullscreen = false;
 };
 

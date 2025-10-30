@@ -28,8 +28,9 @@ public:
     qreal devicePixelRatio() const override;
     uint refreshRate() const override;
 
-    void render(GLFramebuffer *target) override;
-    void render(QImage *target) override;
+    void setRenderCursor(bool enable) override;
+    QRegion render(GLFramebuffer *target, const QRegion &bufferDamage) override;
+    QRegion render(QImage *target, const QRegion &bufferDamage) override;
     std::chrono::nanoseconds clock() const override;
 
     void resume() override;
@@ -41,11 +42,14 @@ public:
     QRectF mapFromGlobal(const QRectF &rect) const override;
 
 private:
-    void report();
+    void add(Window *window);
+    void watch(Window *window);
+    void unwatch(Window *window);
+    QRectF boundingRect() const;
 
-    QPointer<Window> m_window;
-    QTimer m_timer;
+    QList<Window *> m_windows;
     bool m_active = false;
+    bool m_renderCursor = false;
 };
 
 } // namespace KWin

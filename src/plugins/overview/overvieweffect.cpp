@@ -26,7 +26,7 @@ OverviewEffect::OverviewEffect()
     : m_overviewState(new EffectTogglableState(this))
     // manages the transition between overview -> grid
     , m_transitionState(new EffectTogglableState(this))
-    // manages the transition betwee inactive -> overview
+    // manages the transition between inactive -> overview
     , m_gridState(new EffectTogglableState(this))
     , m_border(new EffectTogglableTouchBorder(m_overviewState))
     , m_gridBorder(new EffectTogglableTouchBorder(m_gridState))
@@ -141,6 +141,7 @@ OverviewEffect::OverviewEffect()
     auto overviewAction = m_overviewState->toggleAction();
     overviewAction->setObjectName(QStringLiteral("Overview"));
     overviewAction->setText(i18nc("@action Overview is the name of a Kwin effect", "Toggle Overview"));
+    overviewAction->setAutoRepeat(false);
     KGlobalAccel::self()->setDefaultShortcut(overviewAction, {defaultOverviewShortcut});
     KGlobalAccel::self()->setShortcut(overviewAction, {defaultOverviewShortcut});
     m_overviewShortcut = KGlobalAccel::self()->shortcut(overviewAction);
@@ -149,6 +150,7 @@ OverviewEffect::OverviewEffect()
     auto gridAction = m_gridState->toggleAction();
     gridAction->setObjectName(QStringLiteral("Grid View"));
     gridAction->setText(i18nc("@action Grid view is the name of a Kwin effect", "Toggle Grid View"));
+    gridAction->setAutoRepeat(false);
     KGlobalAccel::self()->setDefaultShortcut(gridAction, {defaultGridShortcut});
     KGlobalAccel::self()->setShortcut(gridAction, {defaultGridShortcut});
     m_gridShortcut = KGlobalAccel::self()->shortcut(gridAction);
@@ -164,7 +166,7 @@ OverviewEffect::OverviewEffect()
             qWarning() << "Failed to load overview:" << delegate->errorString();
         }
     });
-    delegate->loadUrl(QUrl(QStringLiteral("qrc:/overview/qml/main.qml")), QQmlComponent::Asynchronous);
+    delegate->loadFromModule(QStringLiteral("org.kde.kwin.overview"), QStringLiteral("Main"), QQmlComponent::Asynchronous);
     setDelegate(delegate);
 }
 

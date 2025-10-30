@@ -231,16 +231,35 @@ DrmGpu *DrmBackend::addGpu(const QString &fileName)
     qCDebug(KWIN_DRM, "adding GPU %s", qPrintable(fileName));
     connect(gpu, &DrmGpu::outputAdded, this, &DrmBackend::addOutput);
     connect(gpu, &DrmGpu::outputRemoved, this, &DrmBackend::removeOutput);
+    if (m_renderBackend) {
+        gpu->createLayers();
+    }
     Q_EMIT gpuAdded(gpu);
     return gpu;
+}
+
+static QString earlyIdentifier(Output *output)
+{
+    // We can't use the output's UUID because that's only set later, by the output config system.
+    // This doesn't need to be perfectly accurate though, sometimes getting a false positive is ok,
+    // so this just uses EDID ID, EDID hash or connector name, whichever is available
+    if (output->edid().isValid()) {
+        if (!output->edid().identifier().isEmpty()) {
+            return output->edid().identifier();
+        } else {
+            return output->edid().hash();
+        }
+    } else {
+        return output->name();
+    }
 }
 
 void DrmBackend::addOutput(DrmAbstractOutput *o)
 {
     const bool allOff = std::ranges::all_of(m_outputs, [](Output *output) {
-        return output->dpmsMode() != Output::DpmsMode::On;
+        return !output->isEnabled() || output->dpmsMode() != Output::DpmsMode::On;
     });
-    if (allOff && m_recentlyUnpluggedDpmsOffOutputs.contains(o->uuid())) {
+    if (allOff && m_recentlyUnpluggedDpmsOffOutputs.contains(earlyIdentifier(o))) {
         if (DrmOutput *drmOutput = qobject_cast<DrmOutput *>(o)) {
             // When the system is in dpms power saving mode, KWin turns on all outputs if the user plugs a new output in
             // as that's an intentional action and they expect to see the output light up.
@@ -249,7 +268,7 @@ void DrmBackend::addOutput(DrmAbstractOutput *o)
             drmOutput->updateDpmsMode(Output::DpmsMode::Off);
             drmOutput->pipeline()->setActive(false);
             drmOutput->renderLoop()->inhibit();
-            m_recentlyUnpluggedDpmsOffOutputs.removeOne(drmOutput->uuid());
+            m_recentlyUnpluggedDpmsOffOutputs.removeOne(earlyIdentifier(drmOutput));
         }
     }
     m_outputs.append(o);
@@ -261,7 +280,7 @@ static const int s_dpmsTimeout = environmentVariableIntValue("KWIN_DPMS_WORKAROU
 void DrmBackend::removeOutput(DrmAbstractOutput *o)
 {
     if (o->dpmsMode() == Output::DpmsMode::Off) {
-        const QString id = o->uuid();
+        const QString id = earlyIdentifier(o);
         m_recentlyUnpluggedDpmsOffOutputs.push_back(id);
         QTimer::singleShot(s_dpmsTimeout, this, [this, id]() {
             m_recentlyUnpluggedDpmsOffOutputs.removeOne(id);
@@ -415,6 +434,9 @@ OutputConfigurationError DrmBackend::applyOutputChanges(const OutputConfiguratio
             output->applyQueuedChanges(changeset);
         }
     }
+    for (const auto &gpu : m_gpus) {
+        gpu->releaseUnusedBuffers();
+    }
     // only then apply changes to the virtual outputs
     for (DrmVirtualOutput *output : std::as_const(m_virtualOutputs)) {
         output->applyChanges(config);
@@ -435,7 +457,7 @@ DrmRenderBackend *DrmBackend::renderBackend() const
 void DrmBackend::createLayers()
 {
     for (const auto &gpu : m_gpus) {
-        gpu->recreateSurfaces();
+        gpu->createLayers();
     }
     for (DrmVirtualOutput *virt : std::as_const(m_virtualOutputs)) {
         virt->recreateSurface();

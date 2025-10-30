@@ -138,7 +138,7 @@ public:
     void frameRendered(quint32 msec);
     bool hasFrameCallbacks() const;
 
-    std::unique_ptr<PresentationFeedback> takePresentationFeedback(Output *output);
+    std::shared_ptr<PresentationFeedback> presentationFeedback(Output *output);
     bool hasPresentationFeedback() const;
 
     QRegion opaque() const;
@@ -300,12 +300,12 @@ public:
      */
     qreal scaleOverride() const;
     /**
-     * Convert a co-ordinate from kwin logical space to surface logical space
+     * Convert a coordinate from kwin logical space to surface logical space
      * @internal
      */
     QPoint toSurfaceLocal(const QPoint &point) const;
     /**
-     * Convert a co-ordinate from kwin logical space to surface logical space
+     * Convert a coordinate from kwin logical space to surface logical space
      * @internal
      */
     QPointF toSurfaceLocal(const QPointF &point) const;
@@ -341,10 +341,10 @@ public:
     Transaction *lastTransaction() const;
     void setLastTransaction(Transaction *transaction);
 
-    const ColorDescription &colorDescription() const;
+    const std::shared_ptr<ColorDescription> &colorDescription() const;
     RenderingIntent renderingIntent() const;
 
-    void setPreferredColorDescription(const ColorDescription &descr);
+    void setPreferredColorDescription(const std::shared_ptr<ColorDescription> &descr);
 
     double alphaMultiplier() const;
 
@@ -388,6 +388,8 @@ public:
      * @internal
      */
     void removeExtension(RawSurfaceExtension *extension);
+
+    QPointF mapToMainSurface(const QPointF &localPoint) const;
 
 Q_SIGNALS:
     /**
@@ -438,7 +440,7 @@ Q_SIGNALS:
      */
     void childSubSurfaceAdded(SubSurfaceInterface *subSurface);
     /**
-     * Emitted whenver the child sub-surface @p subSurface is removed.
+     * Emitted whenever the child sub-surface @p subSurface is removed.
      */
     void childSubSurfaceRemoved(SubSurfaceInterface *subSurface);
     /**

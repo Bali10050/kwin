@@ -55,7 +55,6 @@ public:
     QStringList checkActivity(QStringList activity, bool init = false) const;
     MaximizeMode checkMaximize(MaximizeMode mode, bool init = false) const;
     bool checkMinimize(bool minimized, bool init = false) const;
-    ShadeMode checkShade(ShadeMode shade, bool init = false) const;
     bool checkSkipTaskbar(bool skip, bool init = false) const;
     bool checkSkipPager(bool skip, bool init = false) const;
     bool checkSkipSwitcher(bool skip, bool init = false) const;
@@ -65,8 +64,8 @@ public:
     bool checkNoBorder(bool noborder, bool init = false) const;
     QString checkDecoColor(QString schemeFile) const;
     bool checkBlockCompositing(bool block) const;
-    int checkFSP(int fsp) const;
-    int checkFPP(int fpp) const;
+    FocusStealingPreventionLevel checkFSP(FocusStealingPreventionLevel fsp) const;
+    FocusStealingPreventionLevel checkFPP(FocusStealingPreventionLevel fpp) const;
     bool checkAcceptFocus(bool focus) const;
     bool checkCloseable(bool closeable) const;
     bool checkAutogrouping(bool autogroup) const;
@@ -100,7 +99,6 @@ public:
         MaximizeVert = 1 << 3,
         MaximizeHoriz = 1 << 4,
         Minimize = 1 << 5,
-        Shade = 1 << 6,
         SkipTaskbar = 1 << 7,
         SkipPager = 1 << 8,
         SkipSwitcher = 1 << 9,
@@ -124,7 +122,7 @@ public:
         Force, // force the given value
         Apply, // apply only after initial mapping
         Remember, // like apply, and remember the value when the window is withdrawn
-        ApplyNow, // apply immediatelly, then forget the setting
+        ApplyNow, // apply immediately, then forget the setting
         ForceTemporarily // apply and force until the window is withdrawn
     };
     enum StringMatch {
@@ -167,7 +165,6 @@ public:
     bool applyMaximizeVert(MaximizeMode &mode, bool init) const;
     bool applyMaximizeHoriz(MaximizeMode &mode, bool init) const;
     bool applyMinimize(bool &minimized, bool init) const;
-    bool applyShade(ShadeMode &shade, bool init) const;
     bool applySkipTaskbar(bool &skip, bool init) const;
     bool applySkipPager(bool &skip, bool init) const;
     bool applySkipSwitcher(bool &skip, bool init) const;
@@ -177,8 +174,8 @@ public:
     bool applyNoBorder(bool &noborder, bool init) const;
     bool applyDecoColor(QString &schemeFile) const;
     bool applyBlockCompositing(bool &block) const;
-    bool applyFSP(int &fsp) const;
-    bool applyFPP(int &fpp) const;
+    bool applyFSP(FocusStealingPreventionLevel &fsp) const;
+    bool applyFPP(FocusStealingPreventionLevel &fpp) const;
     bool applyAcceptFocus(bool &focus) const;
     bool applyCloseable(bool &closeable) const;
     bool applyAutogrouping(bool &autogroup) const;
@@ -257,8 +254,6 @@ private:
     SetRule maximizehorizrule;
     bool minimize;
     SetRule minimizerule;
-    bool shade;
-    SetRule shaderule;
     bool skiptaskbar;
     SetRule skiptaskbarrule;
     bool skippager;
@@ -277,8 +272,8 @@ private:
     ForceRule decocolorrule;
     bool blockcompositing;
     ForceRule blockcompositingrule;
-    int fsplevel;
-    int fpplevel;
+    FocusStealingPreventionLevel fsplevel;
+    FocusStealingPreventionLevel fpplevel;
     ForceRule fsplevelrule;
     ForceRule fpplevelrule;
     bool acceptfocus;

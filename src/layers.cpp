@@ -173,7 +173,7 @@ void Workspace::propagateWindows(bool propagate_new_windows)
     cl.clear();
     for (auto it = stacking_order.constBegin(); it != stacking_order.constEnd(); ++it) {
         X11Window *window = qobject_cast<X11Window *>(*it);
-        if (window && !window->isUnmanaged()) {
+        if (window && !window->isDeleted() && !window->isUnmanaged()) {
             cl.push_back(window->window());
         }
     }
@@ -204,7 +204,7 @@ Window *Workspace::topWindowOnDesktop(VirtualDesktop *desktop, Output *output, b
         if (!window->isClient() || window->isDeleted()) {
             continue;
         }
-        if (window->isOnDesktop(desktop) && window->isShown() && window->isOnCurrentActivity() && !window->isShade()) {
+        if (window->isOnDesktop(desktop) && window->isShown() && window->isOnCurrentActivity()) {
             if (output && window->output() != output) {
                 continue;
             }
@@ -306,7 +306,7 @@ void Workspace::raiseOrLowerWindow(Window *window)
         if (layer != computeLayer(*it) || !(*it)->isClient() || (*it)->isDeleted()) {
             continue;
         }
-        if ((*it)->isOnDesktop(desktop) && (*it)->isShown() && (*it)->isOnCurrentActivity() && !(*it)->isShade()) {
+        if ((*it)->isOnDesktop(desktop) && (*it)->isShown() && (*it)->isOnCurrentActivity()) {
             if (output && (*it)->output() != output) {
                 continue;
             }

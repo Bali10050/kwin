@@ -17,7 +17,7 @@
 namespace KWin
 {
 
-DrmCrtc::DrmCrtc(DrmGpu *gpu, uint32_t crtcId, int pipeIndex, DrmPlane *primaryPlane, DrmPlane *cursorPlane)
+DrmCrtc::DrmCrtc(DrmGpu *gpu, uint32_t crtcId, int pipeIndex, DrmPlane *primaryPlane)
     : DrmObject(gpu, crtcId, DRM_MODE_OBJECT_CRTC)
     , modeId(this, QByteArrayLiteral("MODE_ID"))
     , active(this, QByteArrayLiteral("ACTIVE"))
@@ -30,7 +30,6 @@ DrmCrtc::DrmCrtc(DrmGpu *gpu, uint32_t crtcId, int pipeIndex, DrmPlane *primaryP
     , m_crtc(drmModeGetCrtc(gpu->fd(), crtcId))
     , m_pipeIndex(pipeIndex)
     , m_primaryPlane(primaryPlane)
-    , m_cursorPlane(cursorPlane)
 {
 }
 
@@ -56,18 +55,17 @@ bool DrmCrtc::updateProperties()
 
     if (!postBlendingPipeline) {
         DrmAbstractColorOp *next = nullptr;
-        if (gammaLut.isValid() && gammaLutSize.isValid() && gammaLutSize.value() > 0) {
-            m_postBlendingColorOps.push_back(std::make_unique<DrmLutColorOp>(next, &gammaLut, gammaLutSize.value()));
+        if (gammaLut.isValid()) {
+            m_postBlendingColorOps.push_back(std::make_unique<DrmLutColorOp>(next, &gammaLut, gammaRampSize()));
             next = m_postBlendingColorOps.back().get();
         }
         if (!gpu()->isNVidia() && ctm.isValid()) {
             m_postBlendingColorOps.push_back(std::make_unique<LegacyMatrixColorOp>(next, &ctm));
             next = m_postBlendingColorOps.back().get();
         }
-        if (!gpu()->isNVidia() && !gpu()->isI915() && degammaLut.isValid() && degammaLutSize.isValid() && degammaLutSize.value() > 0) {
-            m_postBlendingColorOps.push_back(std::make_unique<DrmLutColorOp>(next, &degammaLut, degammaLutSize.value()));
-            next = m_postBlendingColorOps.back().get();
-        }
+        // DEGAMMA_LUT is intentionally not part of the post blending pipeline
+        // as on most hardware it actually maps to pre-blending operations,
+        // and more importantly it's buggy on Intel, AMD and NVidia...
         postBlendingPipeline = next;
     }
 
@@ -117,11 +115,6 @@ int DrmCrtc::gammaRampSize() const
 DrmPlane *DrmCrtc::primaryPlane() const
 {
     return m_primaryPlane;
-}
-
-DrmPlane *DrmCrtc::cursorPlane() const
-{
-    return m_cursorPlane;
 }
 
 void DrmCrtc::disable(DrmAtomicCommit *commit)

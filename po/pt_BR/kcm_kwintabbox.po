@@ -4,69 +4,69 @@
 #
 # Luiz Fernando Ranghetti <elchevive@opensuse.org>, 2009, 2010, 2012, 2016, 2017, 2018, 2021, 2022.
 # André Marcelo Alvarenga <alvarenga@kde.org>, 2009, 2010, 2011, 2012, 2014, 2015, 2019.
-# Marcus Gama <marcus.gama@gmail.com>, 2012.
+# SPDX-FileCopyrightText: 2012, 2025 Marcus Gama <marcus.gama@gmail.com>
 # SPDX-FileCopyrightText: 2024, 2025 Geraldo Simiao <geraldosimiao@fedoraproject.org>
 # SPDX-FileCopyrightText: 2025 Guilherme Marçal Silva <guimarcalsilva@gmail.com>
 msgid ""
 msgstr ""
 "Project-Id-Version: kcm_kwintabbox\n"
 "Report-Msgid-Bugs-To: https://bugs.kde.org\n"
-"POT-Creation-Date: 2025-04-19 00:43+0000\n"
-"PO-Revision-Date: 2025-02-05 21:55-0300\n"
-"Last-Translator: Guilherme Marçal Silva <guimarcalsilva@gmail.com>\n"
+"POT-Creation-Date: 2025-09-23 00:44+0000\n"
+"PO-Revision-Date: 2025-09-23 07:34-0300\n"
+"Last-Translator: Marcus Gama <marcus.gama@gmail.com>\n"
 "Language-Team: Brazilian Portuguese <kde-i18n-pt_BR@kde.org>\n"
 "Language: pt_BR\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n > 1);\n"
-"X-Generator: Lokalize 24.12.1\n"
-
-#: layoutpreview.cpp:27
-#, kde-format
-msgid "Launch an interactive preview for a tabbox switcher"
-msgstr ""
+"X-Generator: Lokalize 25.08.1\n"
 
 #: layoutpreview.cpp:28
 #, kde-format
-msgid "Path to the Window Switcher QML main file"
-msgstr ""
+msgid "Launch an interactive preview for a tabbox switcher"
+msgstr "Inicie uma visualização interativa para um seletor de caixas de guias"
 
 #: layoutpreview.cpp:29
 #, kde-format
-msgid "Show also a thumbnail for the desktop"
-msgstr ""
+msgid "Path to the Window Switcher QML main file"
+msgstr "Caminho para o arquivo principal QML do seletor de janelas"
 
-#: layoutpreview.cpp:156
+#: layoutpreview.cpp:30
+#, kde-format
+msgid "Show also a thumbnail for the desktop"
+msgstr "Mostrar também uma miniatura para a área de trabalho"
+
+#: layoutpreview.cpp:159
 #, kde-format
 msgctxt "The name of KDE's file manager in this language, if translated"
 msgid "Dolphin"
 msgstr "Dolphin"
 
-#: layoutpreview.cpp:160
+#: layoutpreview.cpp:163
 #, kde-format
 msgctxt "The name of KDE's web browser in this language, if translated"
 msgid "Konqueror"
 msgstr "Konqueror"
 
-#: layoutpreview.cpp:164
+#: layoutpreview.cpp:167
 #, kde-format
 msgctxt "The name of KDE's email client in this language, if translated"
 msgid "KMail"
 msgstr "KMail"
 
-#: layoutpreview.cpp:168
+#: layoutpreview.cpp:171
 #, kde-format
 msgctxt "The name of KDE's System Settings app in this language, if translated"
 msgid "System Settings"
 msgstr "Configurações do sistema"
 
-#: layoutpreview.cpp:174
+#: layoutpreview.cpp:177
 #, kde-format
-msgid "Show Desktop"
-msgstr "Mostrar área de trabalho"
+msgid "Peek at Desktop"
+msgstr "Espiar área de trabalho"
 
-#: layoutpreview.cpp:204
+#: layoutpreview.cpp:207
 #, kde-format
 msgctxt "An example Desktop Name"
 msgid "Desktop 1"
@@ -104,8 +104,8 @@ msgstr "Conteúdo"
 #. i18n: ectx: property (text), widget (QCheckBox, showDesktop)
 #: main.ui:41
 #, kde-format
-msgid "Include \"Show Desktop\" entry"
-msgstr "Incluir \"Mostrar área de trabalho\""
+msgid "Include \"Peek at Desktop\" entry"
+msgstr "Incluir entrada \"Espiar área de trabalho\""
 
 #. i18n: ectx: property (text), item, widget (QComboBox, switchingModeCombo)
 #: main.ui:55
@@ -248,7 +248,7 @@ msgstr "Inverter"
 #: main.ui:474 main.ui:506 main.ui:554 main.ui:586
 #, kde-format
 msgid "or"
-msgstr ""
+msgstr "ou"
 
 #. i18n: ectx: property (text), widget (QLabel, label_2)
 #: main.ui:538
@@ -326,6 +326,9 @@ msgstr "Passear pelas janelas do aplicativo atual alternativo"
 #, kde-format
 msgid "Walk Through Windows of Current Application Alternative (Reverse)"
 msgstr "Passear pelas janelas do aplicativo atual alternativo (reverso)"
+
+#~ msgid "Show Desktop"
+#~ msgstr "Mostrar área de trabalho"
 
 #~ msgid "KWin"
 #~ msgstr "KWin"

@@ -1,3 +1,4 @@
+
 /*
     SPDX-FileCopyrightText: 2022 Vlad Zahorodnii <vlad.zahorodnii@kde.org>
 
@@ -6,8 +7,10 @@
 
 #pragma once
 
+#include "core/colorpipeline.h"
 #include "core/rendertarget.h"
 #include "kwin_export.h"
+#include "utils/drm_format_helper.h"
 
 #include <QObject>
 #include <QPointer>
@@ -22,6 +25,7 @@ class SurfaceItem;
 class DrmDevice;
 class GraphicsBuffer;
 class OutputFrame;
+class GLTexture;
 
 struct OutputLayerBeginFrameInfo
 {
@@ -29,11 +33,39 @@ struct OutputLayerBeginFrameInfo
     QRegion repaint;
 };
 
+enum class OutputLayerType {
+    /**
+     * Required for driving an output
+     */
+    Primary,
+    /**
+     * Can only be used for cursor, or cursor-attached items,
+     * as the layer may be moved asynchronously by a different process
+     * (like the host compositor in a nested session)
+     */
+    CursorOnly,
+    /**
+     * Should be preferred to normal overlays when possible, as they're
+     * often more efficient (but often come with size restrictions)
+     */
+    EfficientOverlay,
+    /**
+     * Generic over- or underlay
+     */
+    GenericLayer,
+};
+
 class KWIN_EXPORT OutputLayer : public QObject
 {
     Q_OBJECT
 public:
-    explicit OutputLayer(Output *output);
+    explicit OutputLayer(Output *output, OutputLayerType type);
+    explicit OutputLayer(Output *output, OutputLayerType type, int zpos, int minZpos, int maxZpos);
+
+    OutputLayerType type() const;
+
+    void setRenderLoop(RenderLoop *loop);
+    void setOutput(Output *output);
 
     QPointF hotspot() const;
     void setHotspot(const QPointF &hotspot);
@@ -46,6 +78,10 @@ public:
 
     QRegion repaints() const;
     void resetRepaints();
+    void scheduleRepaint(Item *item);
+    /**
+     * adds a repaint in layer-local logical coordinates
+     */
     void addRepaint(const QRegion &region);
     bool needsRepaint() const;
 
@@ -55,6 +91,12 @@ public:
     void setEnabled(bool enable);
     bool isEnabled() const;
 
+    /**
+     * If the output backend needs to test presentations,
+     * the layer should override this function to allocate buffers for the test
+     */
+    virtual bool preparePresentationTest();
+
     std::optional<OutputLayerBeginFrameInfo> beginFrame();
     bool endFrame(const QRegion &renderedRegion, const QRegion &damagedRegion, OutputFrame *frame);
 
@@ -63,12 +105,9 @@ public:
      * for whether or not direct scanout *could* be successful
      * A presentation request on the output must however be used afterwards to find out if it's actually successful!
      */
-    bool importScanoutBuffer(SurfaceItem *item, const std::shared_ptr<OutputFrame> &frame);
+    virtual bool importScanoutBuffer(GraphicsBuffer *buffer, const std::shared_ptr<OutputFrame> &frame);
 
-    /**
-     * Notify that there's no scanout candidate this frame
-     */
-    void notifyNoScanoutCandidate();
+    void setScanoutCandidate(SurfaceItem *item);
 
     virtual DrmDevice *scanoutDevice() const = 0;
     virtual QHash<uint32_t, QList<uint64_t>> supportedDrmFormats() const = 0;
@@ -88,16 +127,40 @@ public:
      * Returns the transform this layer will apply to content passed to it
      */
     OutputTransform offloadTransform() const;
+    void setOffloadTransform(const OutputTransform &transform);
     /**
      * Returns the transform a buffer passed into this layer already has
      */
     OutputTransform bufferTransform() const;
+    void setBufferTransform(const OutputTransform &transform);
+
+    const ColorPipeline &colorPipeline() const;
+    const std::shared_ptr<ColorDescription> &colorDescription() const;
+    RenderingIntent renderIntent() const;
+    void setColor(const std::shared_ptr<ColorDescription> &color, RenderingIntent intent, const ColorPipeline &pipeline);
+
+    /**
+     * Set the required bits for compositing on this plane. Direct scanout is not affected.
+     */
+    void setRequiredAlphaBits(uint32_t bits);
+
+    void setZpos(int zpos);
+    int zpos() const;
+    int minZpos() const;
+    int maxZpos() const;
+
+    static QList<FormatInfo> filterAndSortFormats(const QHash<uint32_t, QList<uint64_t>> &formats, uint32_t requiredAlphaBits, Output::ColorPowerTradeoff tradeoff);
+
+    virtual void releaseBuffers() = 0;
+
+Q_SIGNALS:
+    void repaintScheduled();
 
 protected:
-    virtual bool doImportScanoutBuffer(GraphicsBuffer *buffer, const ColorDescription &color, RenderingIntent intent, const std::shared_ptr<OutputFrame> &frame);
     virtual std::optional<OutputLayerBeginFrameInfo> doBeginFrame() = 0;
     virtual bool doEndFrame(const QRegion &renderedRegion, const QRegion &damagedRegion, OutputFrame *frame) = 0;
 
+    const OutputLayerType m_type;
     QRegion m_repaints;
     QPointF m_hotspot;
     QRectF m_sourceRect;
@@ -106,8 +169,17 @@ protected:
     bool m_enabled = false;
     OutputTransform m_offloadTransform = OutputTransform::Kind::Normal;
     OutputTransform m_bufferTransform = OutputTransform::Kind::Normal;
+    ColorPipeline m_colorPipeline;
+    std::shared_ptr<ColorDescription> m_color = ColorDescription::sRGB;
+    RenderingIntent m_renderingIntent = RenderingIntent::Perceptual;
     QPointer<SurfaceItem> m_scanoutCandidate;
-    Output *const m_output;
+    QPointer<Output> m_output;
+    uint32_t m_requiredAlphaBits = 0;
+    bool m_repaintScheduled = false;
+    RenderLoop *m_renderLoop = nullptr;
+    int m_zpos = 0;
+    int m_minZpos = 0;
+    int m_maxZpos = 0;
 };
 
 } // namespace KWin

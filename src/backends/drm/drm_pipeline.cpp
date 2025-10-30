@@ -37,10 +37,6 @@ using namespace std::literals;
 namespace KWin
 {
 
-static const QList<uint64_t> implicitModifier = {DRM_FORMAT_MOD_INVALID};
-static const QHash<uint32_t, QList<uint64_t>> legacyFormats = {{DRM_FORMAT_XRGB8888, implicitModifier}};
-static const QHash<uint32_t, QList<uint64_t>> legacyCursorFormats = {{DRM_FORMAT_ARGB8888, implicitModifier}};
-
 DrmPipeline::DrmPipeline(DrmConnector *conn)
     : m_connector(conn)
     , m_commitThread(std::make_unique<DrmCommitThread>(conn->gpu(), conn->connectorName()))
@@ -54,27 +50,52 @@ DrmPipeline::~DrmPipeline()
     m_commitThread.reset();
 }
 
-DrmPipeline::Error DrmPipeline::present(const std::shared_ptr<OutputFrame> &frame)
+DrmPipeline::Error DrmPipeline::testPresent(const std::shared_ptr<OutputFrame> &frame)
+{
+    if (!gpu()->atomicModeSetting()) {
+        // we can do nothing but hope for the best
+        // the compositor will have to do a fallback for when the real present fails
+        return Error::None;
+    }
+    // test the full state with all planes, to take pending commits into account
+    return DrmPipeline::commitPipelinesAtomic({this}, CommitMode::Test, frame, {});
+}
+
+DrmPipeline::Error DrmPipeline::present(const QList<OutputLayer *> &layersToUpdate, const std::shared_ptr<OutputFrame> &frame)
 {
     Q_ASSERT(m_pending.crtc);
     if (gpu()->atomicModeSetting()) {
-        // test the full state, to take pending commits into account
-        if (auto err = DrmPipeline::commitPipelinesAtomic({this}, CommitMode::Test, frame, {}); err != Error::None) {
+        // TODO once the compositor tests presentation,
+        // drop this unnecessary additional test
+        if (auto err = testPresent(frame); err != Error::None) {
             return err;
         }
         // only give the actual state update to the commit thread, so that it can potentially reorder the commits
-        auto primaryPlaneUpdate = std::make_unique<DrmAtomicCommit>(QList<DrmPipeline *>{this});
-        if (Error err = prepareAtomicPresentation(primaryPlaneUpdate.get(), frame); err != Error::None) {
+        auto partialUpdate = std::make_unique<DrmAtomicCommit>(QList<DrmPipeline *>{this});
+        if (Error err = prepareAtomicPresentation(partialUpdate.get(), frame); err != Error::None) {
             return err;
         }
-        if (m_pending.needsModesetProperties && !prepareAtomicModeset(primaryPlaneUpdate.get())) {
+        for (const auto layer : layersToUpdate) {
+            const auto pipelineLayer = static_cast<DrmPipelineLayer *>(layer);
+            if (Error err = prepareAtomicPlane(partialUpdate.get(), pipelineLayer->plane(), pipelineLayer, frame); err != Error::None) {
+                return err;
+            }
+        }
+        if (layersToUpdate.isEmpty()) {
+            // work around amdgpu not giving us a valid pageflip timestamp
+            // if the commit doesn't contain a drm plane
+            if (Error err = prepareAtomicPlane(partialUpdate.get(), m_pending.layers.front()->plane(), m_pending.layers.front(), frame); err != Error::None) {
+                return err;
+            }
+        }
+        if (m_pending.needsModesetProperties && !prepareAtomicModeset(partialUpdate.get())) {
             return Error::InvalidArguments;
         }
         m_next.needsModesetProperties = m_pending.needsModesetProperties = false;
-        m_commitThread->addCommit(std::move(primaryPlaneUpdate));
+        m_commitThread->addCommit(std::move(partialUpdate));
         return Error::None;
     } else {
-        return presentLegacy(frame);
+        return presentLegacy(layersToUpdate, frame);
     }
 }
 
@@ -148,7 +169,6 @@ DrmPipeline::Error DrmPipeline::commitPipelinesAtomic(const QList<DrmPipeline *>
     }
     case CommitMode::Test: {
         if (!commit->test()) {
-            qCDebug(KWIN_DRM) << "Atomic test failed!" << strerror(errno);
             return errnoToError();
         }
         return Error::None;
@@ -164,8 +184,10 @@ DrmPipeline::Error DrmPipeline::prepareAtomicCommit(DrmAtomicCommit *commit, Com
         if (Error err = prepareAtomicPresentation(commit, frame); err != Error::None) {
             return err;
         }
-        if (m_pending.crtc->cursorPlane()) {
-            prepareAtomicCursor(commit);
+        for (const auto &layer : m_pending.layers) {
+            if (Error err = prepareAtomicPlane(commit, layer->plane(), layer, frame); err != Error::None) {
+                return err;
+            }
         }
         if (mode == CommitMode::TestAllowModeset || mode == CommitMode::CommitModeset || m_pending.needsModesetProperties) {
             if (!prepareAtomicModeset(commit)) {
@@ -189,10 +211,13 @@ DrmPipeline::Error DrmPipeline::prepareAtomicPresentation(DrmAtomicCommit *commi
         commit->setVrr(m_pending.crtc, m_pending.presentationMode == PresentationMode::AdaptiveSync || m_pending.presentationMode == PresentationMode::AdaptiveAsync);
     }
 
-    if (m_cursorLayer->isEnabled() && m_primaryLayer->colorPipeline() != m_cursorLayer->colorPipeline()) {
+    const bool differentPipelines = std::ranges::any_of(m_pending.layers | std::views::drop(1), [&](OutputLayer *layer) {
+        return layer->isEnabled() && layer->colorPipeline() != m_pending.layers.front()->colorPipeline();
+    });
+    if (differentPipelines) {
         return DrmPipeline::Error::InvalidArguments;
     }
-    const ColorPipeline colorPipeline = m_primaryLayer->colorPipeline().merged(m_pending.crtcColorPipeline);
+    const ColorPipeline colorPipeline = m_pending.layers.front()->colorPipeline().merged(m_pending.crtcColorPipeline);
     if (!m_pending.crtc->postBlendingPipeline) {
         if (!colorPipeline.isIdentity()) {
             return Error::InvalidArguments;
@@ -203,71 +228,84 @@ DrmPipeline::Error DrmPipeline::prepareAtomicPresentation(DrmAtomicCommit *commi
         }
     }
 
-    if (!m_primaryLayer->checkTestBuffer()) {
-        qCWarning(KWIN_DRM) << "Checking test buffer failed!";
-        return Error::TestBufferFailed;
-    }
-    const auto fb = m_primaryLayer->currentBuffer();
-    if (!fb) {
-        return Error::InvalidArguments;
-    }
-    const auto primary = m_pending.crtc->primaryPlane();
-    const auto transform = m_primaryLayer->offloadTransform();
-    const auto planeTransform = DrmPlane::outputTransformToPlaneTransform(transform);
-    if (primary->rotation.isValid()) {
-        if (!primary->rotation.hasEnum(planeTransform)) {
-            return Error::InvalidArguments;
-        }
-        commit->addEnum(primary->rotation, planeTransform);
-    } else if (planeTransform != DrmPlane::Transformation::Rotate0) {
-        return Error::InvalidArguments;
-    }
-    primary->set(commit, m_primaryLayer->sourceRect().toRect(), m_primaryLayer->targetRect());
-    commit->addBuffer(m_pending.crtc->primaryPlane(), fb, frame);
-    switch (m_primaryLayer->colorDescription().yuvCoefficients()) {
-    case YUVMatrixCoefficients::Identity:
-        break;
-    case YUVMatrixCoefficients::BT601:
-        if (!primary->colorEncoding.isValid() || !primary->colorRange.isValid()) {
-            return Error::InvalidArguments;
-        }
-        commit->addEnum(primary->colorEncoding, DrmPlane::ColorEncoding::BT601_YCbCr);
-        commit->addEnum(primary->colorRange, DrmPlane::ColorRange::Limited_YCbCr);
-        break;
-    case YUVMatrixCoefficients::BT709:
-        if (!primary->colorEncoding.isValid() || !primary->colorRange.isValid()) {
-            return Error::InvalidArguments;
-        }
-        commit->addEnum(primary->colorEncoding, DrmPlane::ColorEncoding::BT709_YCbCr);
-        commit->addEnum(primary->colorRange, DrmPlane::ColorRange::Limited_YCbCr);
-        break;
-    case YUVMatrixCoefficients::BT2020:
-        if (!primary->colorEncoding.isValid() || !primary->colorRange.isValid()) {
-            return Error::InvalidArguments;
-        }
-        commit->addEnum(primary->colorEncoding, DrmPlane::ColorEncoding::BT2020_YCbCr);
-        commit->addEnum(primary->colorRange, DrmPlane::ColorRange::Limited_YCbCr);
-        break;
-    }
     return Error::None;
 }
 
-void DrmPipeline::prepareAtomicCursor(DrmAtomicCommit *commit)
+DrmPipeline::Error DrmPipeline::prepareAtomicPlane(DrmAtomicCommit *commit, DrmPlane *plane, DrmPipelineLayer *layer, const std::shared_ptr<OutputFrame> &frame)
 {
-    auto plane = m_pending.crtc->cursorPlane();
-    const auto layer = cursorLayer();
-    if (layer->isEnabled()) {
-        plane->set(commit, layer->sourceRect().toRect(), layer->targetRect());
-        commit->addProperty(plane->crtcId, m_pending.crtc->id());
-        commit->addBuffer(plane, layer->currentBuffer(), nullptr);
-        if (plane->vmHotspotX.isValid() && plane->vmHotspotY.isValid()) {
-            commit->addProperty(plane->vmHotspotX, std::round(layer->hotspot().x()));
-            commit->addProperty(plane->vmHotspotY, std::round(layer->hotspot().y()));
-        }
-    } else {
-        commit->addProperty(plane->crtcId, 0);
-        commit->addBuffer(plane, nullptr, nullptr);
+    if (!layer->isEnabled()) {
+        plane->disable(commit);
+        return Error::None;
     }
+    if (!layer->currentBuffer()) {
+        qCWarning(KWIN_DRM) << "An enabled plane has no buffer!";
+        return Error::TestBufferFailed;
+    }
+    const auto fb = layer->currentBuffer();
+    if (!fb) {
+        return Error::InvalidArguments;
+    }
+    const auto transform = layer->offloadTransform();
+    const auto planeTransform = DrmPlane::outputTransformToPlaneTransform(transform);
+    if (plane->rotation.isValid()) {
+        if (!plane->rotation.hasEnum(planeTransform)) {
+            return Error::InvalidArguments;
+        }
+        commit->addEnum(plane->rotation, planeTransform);
+    } else if (planeTransform != DrmPlane::Transformation::Rotate0) {
+        return Error::InvalidArguments;
+    }
+    commit->addProperty(plane->crtcId, m_pending.crtc->id());
+    commit->addBuffer(plane, fb, frame);
+    plane->set(commit, layer->sourceRect().toRect(), layer->targetRect());
+    if (plane->vmHotspotX.isValid() && plane->vmHotspotY.isValid()) {
+        commit->addProperty(plane->vmHotspotX, std::round(layer->hotspot().x()));
+        commit->addProperty(plane->vmHotspotY, std::round(layer->hotspot().y()));
+    }
+
+    if (plane->alpha.isValid()) {
+        commit->addProperty(plane->alpha, plane->alpha.maxValue());
+    }
+    if (plane->pixelBlendMode.isValid()) {
+        commit->addEnum(plane->pixelBlendMode, DrmPlane::PixelBlendMode::PreMultiplied);
+    }
+    if (plane->zpos.isValid() && !plane->zpos.isImmutable()) {
+        commit->addProperty(plane->zpos, layer->zpos());
+    }
+
+    DrmPlane::ColorRange range = DrmPlane::ColorRange::Limited_YCbCr;
+    if (layer->colorDescription()->range() == EncodingRange::Full) {
+        range = DrmPlane::ColorRange::Full_YCbCr;
+    }
+    switch (layer->colorDescription()->yuvCoefficients()) {
+    case YUVMatrixCoefficients::Identity:
+        if (layer->colorDescription()->range() == EncodingRange::Limited) {
+            return Error::InvalidArguments;
+        }
+        break;
+    case YUVMatrixCoefficients::BT601:
+        if (!plane->colorEncoding.isValid() || !plane->colorRange.isValid()) {
+            return Error::InvalidArguments;
+        }
+        commit->addEnum(plane->colorEncoding, DrmPlane::ColorEncoding::BT601_YCbCr);
+        commit->addEnum(plane->colorRange, range);
+        break;
+    case YUVMatrixCoefficients::BT709:
+        if (!plane->colorEncoding.isValid() || !plane->colorRange.isValid()) {
+            return Error::InvalidArguments;
+        }
+        commit->addEnum(plane->colorEncoding, DrmPlane::ColorEncoding::BT709_YCbCr);
+        commit->addEnum(plane->colorRange, range);
+        break;
+    case YUVMatrixCoefficients::BT2020:
+        if (!plane->colorEncoding.isValid() || !plane->colorRange.isValid()) {
+            return Error::InvalidArguments;
+        }
+        commit->addEnum(plane->colorEncoding, DrmPlane::ColorEncoding::BT2020_YCbCr);
+        commit->addEnum(plane->colorRange, range);
+        break;
+    }
+    return Error::None;
 }
 
 void DrmPipeline::prepareAtomicDisable(DrmAtomicCommit *commit)
@@ -275,9 +313,10 @@ void DrmPipeline::prepareAtomicDisable(DrmAtomicCommit *commit)
     m_connector->disable(commit);
     if (m_pending.crtc) {
         m_pending.crtc->disable(commit);
-        m_pending.crtc->primaryPlane()->disable(commit);
-        if (auto cursor = m_pending.crtc->cursorPlane()) {
-            cursor->disable(commit);
+        for (const auto layer : m_pending.layers) {
+            if (DrmPlane *plane = layer->plane()) {
+                plane->disable(commit);
+            }
         }
     }
 }
@@ -346,30 +385,10 @@ bool DrmPipeline::prepareAtomicModeset(DrmAtomicCommit *commit)
 
     commit->addProperty(m_pending.crtc->active, 1);
     commit->addBlob(m_pending.crtc->modeId, m_pending.mode->blob());
+    if (m_pending.crtc->degammaLut.isValid()) {
+        commit->addProperty(m_pending.crtc->degammaLut, 0);
+    }
 
-    const auto primary = m_pending.crtc->primaryPlane();
-    commit->addProperty(primary->crtcId, m_pending.crtc->id());
-    if (primary->rotation.isValid()) {
-        commit->addEnum(primary->rotation, {DrmPlane::Transformation::Rotate0});
-    }
-    if (primary->alpha.isValid()) {
-        commit->addProperty(primary->alpha, primary->alpha.maxValue());
-    }
-    if (primary->pixelBlendMode.isValid()) {
-        commit->addEnum(primary->pixelBlendMode, DrmPlane::PixelBlendMode::PreMultiplied);
-    }
-    if (const auto cursor = m_pending.crtc->cursorPlane()) {
-        if (cursor->rotation.isValid()) {
-            commit->addEnum(cursor->rotation, DrmPlane::Transformations(DrmPlane::Transformation::Rotate0));
-        }
-        if (cursor->alpha.isValid()) {
-            commit->addProperty(cursor->alpha, cursor->alpha.maxValue());
-        }
-        if (cursor->pixelBlendMode.isValid()) {
-            commit->addEnum(cursor->pixelBlendMode, DrmPlane::PixelBlendMode::PreMultiplied);
-        }
-        prepareAtomicCursor(commit);
-    }
     return true;
 }
 
@@ -402,12 +421,9 @@ DrmPipeline::Error DrmPipeline::errnoToError()
     }
 }
 
-bool DrmPipeline::updateCursor(std::optional<std::chrono::nanoseconds> allowedVrrDelay)
+bool DrmPipeline::presentAsync(OutputLayer *layer, std::optional<std::chrono::nanoseconds> allowedVrrDelay)
 {
     if (needsModeset() || !m_pending.crtc || !m_pending.active) {
-        return false;
-    }
-    if (amdgpuVrrWorkaroundActive() && m_cursorLayer->isEnabled()) {
         return false;
     }
     // We need to make sure that on vmwgfx software cursor is selected
@@ -416,35 +432,33 @@ bool DrmPipeline::updateCursor(std::optional<std::chrono::nanoseconds> allowedVr
     if (gpu()->isVmwgfx()) {
         return false;
     }
-    // explicitly check for the cursor plane and not for AMS, as we might not always have one
-    if (m_pending.crtc->cursorPlane()) {
+    const auto drmLayer = static_cast<DrmPipelineLayer *>(layer);
+    if (drmLayer->plane()) {
         // test the full state, to take pending commits into account
         if (DrmPipeline::commitPipelinesAtomic({this}, CommitMode::Test, nullptr, {}) != Error::None) {
             return false;
         }
         // only give the actual state update to the commit thread, so that it can potentially reorder the commits
-        auto cursorOnly = std::make_unique<DrmAtomicCommit>(QList<DrmPipeline *>{this});
-        prepareAtomicCursor(cursorOnly.get());
-        cursorOnly->setAllowedVrrDelay(allowedVrrDelay);
-        m_commitThread->addCommit(std::move(cursorOnly));
+        auto partialUpdate = std::make_unique<DrmAtomicCommit>(QList<DrmPipeline *>{this});
+        prepareAtomicPlane(partialUpdate.get(), drmLayer->plane(), drmLayer, nullptr);
+        partialUpdate->setAllowedVrrDelay(allowedVrrDelay);
+        m_commitThread->addCommit(std::move(partialUpdate));
         return true;
     } else {
-        return setCursorLegacy();
+        return setCursorLegacy(drmLayer);
     }
-}
-
-bool DrmPipeline::amdgpuVrrWorkaroundActive() const
-{
-    static const bool s_env = environmentVariableBoolValue("KWIN_DRM_DONT_FORCE_AMD_SW_CURSOR").value_or(linuxKernelVersion() >= Version(6, 11));
-    return !s_env && gpu()->isAmdgpu() && (m_pending.presentationMode == PresentationMode::AdaptiveSync || m_pending.presentationMode == PresentationMode::AdaptiveAsync);
 }
 
 void DrmPipeline::applyPendingChanges()
 {
+    const bool layersChanged = m_next.layers != m_pending.layers;
     m_next = m_pending;
     m_commitThread->setModeInfo(m_pending.mode->refreshRate(), m_pending.mode->vblankTime());
     m_output->renderLoop()->setPresentationSafetyMargin(m_commitThread->safetyMargin());
     m_output->renderLoop()->setRefreshRate(m_pending.mode->refreshRate());
+    if (layersChanged) {
+        Q_EMIT m_output->outputLayersChanged();
+    }
 }
 
 DrmConnector *DrmPipeline::connector() const
@@ -471,87 +485,14 @@ void DrmPipeline::pageFlipped(std::chrono::nanoseconds timestamp)
 void DrmPipeline::setOutput(DrmOutput *output)
 {
     m_output = output;
+    for (const auto layer : m_pending.layers) {
+        layer->setOutput(output);
+    }
 }
 
 DrmOutput *DrmPipeline::output() const
 {
     return m_output;
-}
-
-QHash<uint32_t, QList<uint64_t>> DrmPipeline::formats(DrmPlane::TypeIndex planeType) const
-{
-    switch (planeType) {
-    case DrmPlane::TypeIndex::Primary:
-        return m_pending.formats;
-    case DrmPlane::TypeIndex::Cursor:
-        if (m_pending.crtc && m_pending.crtc->cursorPlane()) {
-            return m_pending.crtc->cursorPlane()->formats();
-        } else {
-            return legacyCursorFormats;
-        }
-    case DrmPlane::TypeIndex::Overlay:
-        return {};
-    }
-    Q_UNREACHABLE();
-}
-
-QHash<uint32_t, QList<uint64_t>> DrmPipeline::asyncFormats(DrmPlane::TypeIndex planeType) const
-{
-    switch (planeType) {
-    case DrmPlane::TypeIndex::Primary:
-        if (m_pending.crtc && m_pending.crtc->primaryPlane()) {
-            return m_pending.crtc->primaryPlane()->tearingFormats();
-        } else {
-            return legacyFormats;
-        }
-    case DrmPlane::TypeIndex::Cursor:
-        if (m_pending.crtc && m_pending.crtc->cursorPlane()) {
-            return m_pending.crtc->cursorPlane()->tearingFormats();
-        } else {
-            return legacyCursorFormats;
-        }
-    case DrmPlane::TypeIndex::Overlay:
-        return {};
-    }
-    Q_UNREACHABLE();
-}
-
-bool DrmPipeline::pruneModifier()
-{
-    const DmaBufAttributes *dmabufAttributes = m_primaryLayer->currentBuffer() ? m_primaryLayer->currentBuffer()->buffer()->dmabufAttributes() : nullptr;
-    if (!dmabufAttributes) {
-        return false;
-    }
-    auto &modifiers = m_pending.formats[dmabufAttributes->format];
-    if (modifiers == implicitModifier) {
-        return false;
-    } else {
-        qCDebug(KWIN_DRM) << "Pruning modifiers for format" << FormatInfo::drmFormatName(dmabufAttributes->format)
-                          << "on" << m_connector->connectorName();
-        modifiers = implicitModifier;
-        return true;
-    }
-}
-
-QList<QSize> DrmPipeline::recommendedSizes(DrmPlane::TypeIndex planeType) const
-{
-    switch (planeType) {
-    case DrmPlane::TypeIndex::Primary:
-        if (m_pending.crtc && m_pending.crtc->primaryPlane()) {
-            return m_pending.crtc->primaryPlane()->recommendedSizes();
-        } else {
-            return QList<QSize>{};
-        }
-    case DrmPlane::TypeIndex::Cursor:
-        if (m_pending.crtc && m_pending.crtc->cursorPlane()) {
-            return m_pending.crtc->cursorPlane()->recommendedSizes();
-        } else {
-            return QList<QSize>{gpu()->cursorSize()};
-        }
-    case DrmPlane::TypeIndex::Overlay:
-        return QList<QSize>{};
-    }
-    Q_UNREACHABLE();
 }
 
 bool DrmPipeline::needsModeset() const
@@ -604,14 +545,9 @@ bool DrmPipeline::enabled() const
     return m_pending.enabled;
 }
 
-DrmPipelineLayer *DrmPipeline::primaryLayer() const
+QList<DrmPipelineLayer *> DrmPipeline::layers() const
 {
-    return m_primaryLayer.get();
-}
-
-DrmPipelineLayer *DrmPipeline::cursorLayer() const
-{
-    return m_cursorLayer.get();
+    return m_pending.layers;
 }
 
 PresentationMode DrmPipeline::presentationMode() const
@@ -642,11 +578,6 @@ const std::shared_ptr<IccProfile> &DrmPipeline::iccProfile() const
 void DrmPipeline::setCrtc(DrmCrtc *crtc)
 {
     m_pending.crtc = crtc;
-    if (crtc) {
-        m_pending.formats = crtc->primaryPlane() ? crtc->primaryPlane()->formats() : legacyFormats;
-    } else {
-        m_pending.formats = {};
-    }
 }
 
 void DrmPipeline::setMode(const std::shared_ptr<DrmConnectorMode> &mode)
@@ -664,10 +595,12 @@ void DrmPipeline::setEnable(bool enable)
     m_pending.enabled = enable;
 }
 
-void DrmPipeline::setLayers(const std::shared_ptr<DrmPipelineLayer> &primaryLayer, const std::shared_ptr<DrmPipelineLayer> &cursorLayer)
+void DrmPipeline::setLayers(const QList<DrmPipelineLayer *> &layers)
 {
-    m_primaryLayer = primaryLayer;
-    m_cursorLayer = cursorLayer;
+    m_pending.layers = layers;
+    for (const auto layer : layers) {
+        layer->setOutput(m_output);
+    }
 }
 
 void DrmPipeline::setPresentationMode(PresentationMode mode)
@@ -724,7 +657,7 @@ std::shared_ptr<DrmBlob> DrmPipeline::createHdrMetadata(TransferFunction::Type t
     if (!m_connector->edid()->supportsPQ()) {
         return nullptr;
     }
-    const auto colorimetry = m_connector->edid()->colorimetry().value_or(Colorimetry::BT709);
+    const auto colorimetry = m_connector->edid()->nativeColorimetry().value_or(Colorimetry::BT709);
     const xyY red = colorimetry.red().toxyY();
     const xyY green = colorimetry.green().toxyY();
     const xyY blue = colorimetry.blue().toxyY();

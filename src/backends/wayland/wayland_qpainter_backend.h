@@ -9,9 +9,9 @@
 */
 #pragma once
 
-#include "core/outputlayer.h"
 #include "qpainter/qpainterbackend.h"
 #include "utils/damagejournal.h"
+#include "wayland_layer.h"
 
 #include <QImage>
 #include <QObject>
@@ -31,7 +31,7 @@ class WaylandDisplay;
 class WaylandOutput;
 class WaylandQPainterBackend;
 
-class WaylandQPainterPrimaryLayer : public OutputLayer
+class WaylandQPainterPrimaryLayer : public WaylandLayer
 {
 public:
     WaylandQPainterPrimaryLayer(WaylandOutput *output, WaylandQPainterBackend *backend);
@@ -41,6 +41,7 @@ public:
     bool doEndFrame(const QRegion &renderedRegion, const QRegion &damagedRegion, OutputFrame *frame) override;
     DrmDevice *scanoutDevice() const override;
     QHash<uint32_t, QList<uint64_t>> supportedDrmFormats() const override;
+    void releaseBuffers() override;
 
     QRegion accumulateDamage(int bufferAge) const;
 
@@ -68,6 +69,7 @@ public:
     bool doEndFrame(const QRegion &renderedRegion, const QRegion &damagedRegion, OutputFrame *frame) override;
     DrmDevice *scanoutDevice() const override;
     QHash<uint32_t, QList<uint64_t>> supportedDrmFormats() const override;
+    void releaseBuffers() override;
 
 private:
     WaylandQPainterBackend *m_backend;
@@ -84,22 +86,13 @@ public:
     ~WaylandQPainterBackend() override;
 
     GraphicsBufferAllocator *graphicsBufferAllocator() const;
-
-    OutputLayer *primaryLayer(Output *output) override;
-    OutputLayer *cursorLayer(Output *output) override;
+    QList<OutputLayer *> compatibleOutputLayers(Output *output) override;
 
 private:
     void createOutput(Output *waylandOutput);
 
-    struct Layers
-    {
-        std::unique_ptr<WaylandQPainterPrimaryLayer> primaryLayer;
-        std::unique_ptr<WaylandQPainterCursorLayer> cursorLayer;
-    };
-
     WaylandBackend *m_backend;
     std::unique_ptr<GraphicsBufferAllocator> m_allocator;
-    std::map<Output *, Layers> m_outputs;
 };
 
 } // namespace Wayland

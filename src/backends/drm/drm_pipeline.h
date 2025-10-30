@@ -57,7 +57,8 @@ public:
      * tests the pending commit first and commits it if the test passes
      * if the test fails, there is a guarantee for no lasting changes
      */
-    Error present(const std::shared_ptr<OutputFrame> &frame);
+    Error present(const QList<OutputLayer *> &layersToUpdate, const std::shared_ptr<OutputFrame> &frame);
+    Error testPresent(const std::shared_ptr<OutputFrame> &frame);
     void maybeModeset(const std::shared_ptr<OutputFrame> &frame);
     void forceLegacyModeset();
 
@@ -65,7 +66,7 @@ public:
     void applyPendingChanges();
     void revertPendingChanges();
 
-    bool updateCursor(std::optional<std::chrono::nanoseconds> allowedVrrDelay);
+    bool presentAsync(OutputLayer *layer, std::optional<std::chrono::nanoseconds> allowedVrrDelay);
 
     DrmConnector *connector() const;
     DrmGpu *gpu() const;
@@ -75,17 +76,11 @@ public:
     void resetModesetPresentPending();
     DrmCommitThread *commitThread() const;
 
-    QHash<uint32_t, QList<uint64_t>> formats(DrmPlane::TypeIndex planeType) const;
-    QHash<uint32_t, QList<uint64_t>> asyncFormats(DrmPlane::TypeIndex planeType) const;
-    bool pruneModifier();
-    QList<QSize> recommendedSizes(DrmPlane::TypeIndex planeType) const;
-
     void setOutput(DrmOutput *output);
     DrmOutput *output() const;
 
-    void setLayers(const std::shared_ptr<DrmPipelineLayer> &primaryLayer, const std::shared_ptr<DrmPipelineLayer> &cursorLayer);
-    DrmPipelineLayer *primaryLayer() const;
-    DrmPipelineLayer *cursorLayer() const;
+    QList<DrmPipelineLayer *> layers() const;
+    void setLayers(const QList<DrmPipelineLayer *> &layers);
     std::chrono::nanoseconds presentationDeadline() const;
 
     DrmCrtc *crtc() const;
@@ -113,11 +108,6 @@ public:
     void setWideColorGamut(bool wcg);
     void setMaxBpc(uint32_t max);
 
-    /**
-     * amdgpu drops cursor updates with adaptive sync: https://gitlab.freedesktop.org/drm/amd/-/issues/2186
-     */
-    bool amdgpuVrrWorkaroundActive() const;
-
     enum class CommitMode {
         Test,
         TestAllowModeset,
@@ -133,18 +123,18 @@ private:
     std::shared_ptr<DrmBlob> createHdrMetadata(TransferFunction::Type transferFunction) const;
 
     // legacy only
-    Error presentLegacy(const std::shared_ptr<OutputFrame> &frame);
+    Error presentLegacy(const QList<OutputLayer *> &layersToUpdate, const std::shared_ptr<OutputFrame> &frame);
     Error legacyModeset();
     Error setLegacyGamma();
     Error applyPendingChangesLegacy();
-    bool setCursorLegacy();
+    bool setCursorLegacy(DrmPipelineLayer *layer);
     static Error commitPipelinesLegacy(const QList<DrmPipeline *> &pipelines, CommitMode mode, const QList<DrmObject *> &unusedObjects);
 
     // atomic modesetting only
     Error prepareAtomicCommit(DrmAtomicCommit *commit, CommitMode mode, const std::shared_ptr<OutputFrame> &frame);
     bool prepareAtomicModeset(DrmAtomicCommit *commit);
     Error prepareAtomicPresentation(DrmAtomicCommit *commit, const std::shared_ptr<OutputFrame> &frame);
-    void prepareAtomicCursor(DrmAtomicCommit *commit);
+    Error prepareAtomicPlane(DrmAtomicCommit *commit, DrmPlane *plane, DrmPipelineLayer *layer, const std::shared_ptr<OutputFrame> &frame);
     void prepareAtomicDisable(DrmAtomicCommit *commit);
     static Error commitPipelinesAtomic(const QList<DrmPipeline *> &pipelines, CommitMode mode, const std::shared_ptr<OutputFrame> &frame, const QList<DrmObject *> &unusedObjects);
 
@@ -157,7 +147,6 @@ private:
     struct State
     {
         DrmCrtc *crtc = nullptr;
-        QHash<uint32_t, QList<uint64_t>> formats;
         bool active = true; // whether or not the pipeline should be currently used
         bool enabled = true; // whether or not the pipeline needs a crtc
         bool needsModeset = false;
@@ -173,6 +162,8 @@ private:
         bool hdr = false;
         bool wcg = false;
         uint32_t maxBpc = 10;
+
+        QList<DrmPipelineLayer *> layers;
     };
     // the state that is to be tested next
     State m_pending;
@@ -180,8 +171,6 @@ private:
     State m_next;
 
     std::unique_ptr<DrmCommitThread> m_commitThread;
-    std::shared_ptr<DrmPipelineLayer> m_primaryLayer;
-    std::shared_ptr<DrmPipelineLayer> m_cursorLayer;
 };
 
 }

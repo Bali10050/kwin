@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include "core/renderviewport.h"
 #include "scene/scene.h"
 
 namespace KWin
@@ -21,6 +22,7 @@ class Item;
 class SurfaceItem;
 class WindowItem;
 class WindowPaintData;
+class CursorItem;
 
 class KWIN_EXPORT WorkspaceScene : public Scene
 {
@@ -34,12 +36,15 @@ public:
 
     Item *containerItem() const;
     Item *overlayItem() const;
+    Item *cursorItem() const;
 
     QList<SurfaceItem *> scanoutCandidates(ssize_t maxCount) const override;
-    QRegion prePaint(SceneDelegate *delegate) override;
+    OverlayCandidates overlayCandidates(ssize_t maxTotalCount, ssize_t maxOverlayCount, ssize_t maxUnderlayCount) const override;
+    void prePaint(SceneView *delegate) override;
+    QRegion collectDamage() override;
     void postPaint() override;
     void paint(const RenderTarget &renderTarget, const QRegion &region) override;
-    void frame(SceneDelegate *delegate, OutputFrame *frame) override;
+    void frame(SceneView *delegate, OutputFrame *frame) override;
     double desiredHdrHeadroom() const override;
 
     EglContext *openglContext() const;
@@ -94,7 +99,7 @@ protected:
 
     // The screen that is being currently painted
     Output *painted_screen = nullptr;
-    SceneDelegate *painted_delegate = nullptr;
+    SceneView *painted_delegate = nullptr;
 
     // windows in their stacking order
     QList<WindowItem *> stacking_order;
@@ -102,6 +107,7 @@ protected:
 private:
     void createDndIconItem();
     void destroyDndIconItem();
+    void updateCursor();
 
     std::chrono::milliseconds m_expectedPresentTimestamp = std::chrono::milliseconds::zero();
     // how many times finalPaintScreen() has been called
@@ -110,6 +116,7 @@ private:
     std::unique_ptr<Item> m_containerItem;
     std::unique_ptr<Item> m_overlayItem;
     std::unique_ptr<DragAndDropIconItem> m_dndIcon;
+    std::unique_ptr<CursorItem> m_cursorItem;
 };
 
 } // namespace

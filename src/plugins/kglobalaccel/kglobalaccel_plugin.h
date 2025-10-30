@@ -8,6 +8,8 @@
 */
 #pragma once
 
+#include "core/inputdevice.h"
+
 #include <kglobalaccel_interface.h>
 
 #include <QObject>
@@ -23,15 +25,9 @@ public:
     ~KGlobalAccelImpl() override;
 
     bool grabKey(int key, bool grab) override;
-    void setEnabled(bool) override;
 
 public Q_SLOTS:
-    bool checkKeyPressed(int keyQt);
-    bool checkKeyReleased(int keyQt);
+    bool checkKeyPressed(int keyQt, KWin::KeyboardKeyState state);
     bool checkPointerPressed(Qt::MouseButtons buttons);
     bool checkAxisTriggered(int axis);
-
-private:
-    bool m_shuttingDown = false;
-    QMetaObject::Connection m_inputDestroyedConnection;
 };

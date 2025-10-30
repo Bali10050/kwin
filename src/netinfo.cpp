@@ -12,7 +12,9 @@
 #include "netinfo.h"
 // kwin
 #include "rootinfo_filter.h"
+#include "utils/envvar.h"
 #include "virtualdesktops.h"
+#include "waylandwindow.h"
 #include "workspace.h"
 #include "x11window.h"
 // Qt
@@ -55,8 +57,6 @@ RootInfo *RootInfo::create()
         | NET::WMDesktop
         | NET::WMWindowType
         | NET::WMState
-        | NET::WMStrut
-        | NET::WMIconGeometry
         | NET::WMIcon
         | NET::WMPid
         | NET::WMMoveResize
@@ -91,7 +91,6 @@ RootInfo *RootInfo::create()
         | NET::WM2AllowedActions
         | NET::WM2RestackWindow
         | NET::WM2MoveResizeWindow
-        | NET::WM2ExtendedStrut
         | NET::WM2ShowingDesktop
         | NET::WM2DesktopLayout
         | NET::WM2FullPlacement
@@ -127,6 +126,12 @@ void RootInfo::destroy()
     xcb_window_t supportWindow = s_self->supportWindow();
     s_self.reset();
     xcb_destroy_window(kwinApp()->x11Connection(), supportWindow);
+}
+
+bool RootInfo::desktopEnabled()
+{
+    static const bool enabled = environmentVariableIntValue("KWIN_XWAYLAND_ENABLE_NETWM_DESKTOP").value_or(0);
+    return enabled;
 }
 
 RootInfo::RootInfo(xcb_window_t w, const char *name, NET::Properties properties, NET::WindowTypes types,
@@ -239,6 +244,8 @@ void RootInfo::setActiveClient(Window *client)
     xcb_window_t windowId = XCB_WINDOW_NONE;
     if (auto x11Window = qobject_cast<X11Window *>(client)) {
         windowId = x11Window->window();
+    } else if (qobject_cast<WaylandWindow *>(client)) {
+        windowId = Workspace::self()->nullFocusWindow();
     }
     if (m_activeWindow == windowId) {
         return;
@@ -260,10 +267,12 @@ WinInfo::WinInfo(X11Window *c, xcb_window_t window,
 
 void WinInfo::changeDesktop(int desktopId)
 {
-    if (desktopId == NET::OnAllDesktops) {
-        Workspace::self()->sendWindowToDesktops(m_client, {}, true);
-    } else if (VirtualDesktop *desktop = VirtualDesktopManager::self()->desktopForX11Id(desktopId)) {
-        Workspace::self()->sendWindowToDesktops(m_client, {desktop}, true);
+    if (RootInfo::desktopEnabled()) {
+        if (desktopId == NET::OnAllDesktops) {
+            Workspace::self()->sendWindowToDesktops(m_client, {}, true);
+        } else if (VirtualDesktop *desktop = VirtualDesktopManager::self()->desktopForX11Id(desktopId)) {
+            Workspace::self()->sendWindowToDesktops(m_client, {desktop}, true);
+        }
     }
 }
 
@@ -289,9 +298,6 @@ void WinInfo::changeState(NET::States state, NET::States mask)
         m_client->setMaximize(m_client->requestedMaximizeMode() & MaximizeVertical, state & NET::MaxHoriz);
     }
 
-    if (mask & NET::Shaded) {
-        m_client->setShade(state & NET::Shaded ? ShadeNormal : ShadeNone);
-    }
     if (mask & NET::KeepAbove) {
         m_client->setKeepAbove((state & NET::KeepAbove) != 0);
     }

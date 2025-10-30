@@ -13,7 +13,12 @@ FakeOutput::FakeOutput()
     setMode(QSize(1024, 720), 60000);
 }
 
-bool FakeOutput::present(const std::shared_ptr<KWin::OutputFrame> &frame)
+bool FakeOutput::testPresentation(const std::shared_ptr<KWin::OutputFrame> &frame)
+{
+    return false;
+}
+
+bool FakeOutput::present(const QList<KWin::OutputLayer *> &layersToUpdate, const std::shared_ptr<KWin::OutputFrame> &frame)
 {
     return false;
 }

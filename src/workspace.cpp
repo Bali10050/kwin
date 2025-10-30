@@ -51,6 +51,7 @@
 #include "placeholderinputeventfilter.h"
 #include "placeholderoutput.h"
 #include "placementtracker.h"
+#include "pointer_input.h"
 #include "scene/workspacescene.h"
 #include "tabletmodemanager.h"
 #include "tiles/tilemanager.h"
@@ -59,6 +60,7 @@
 #include "utils/orientationsensor.h"
 #include "virtualdesktops.h"
 #include "wayland/externalbrightness_v1.h"
+#include "wayland/surface.h"
 #include "wayland_server.h"
 #if KWIN_BUILD_X11
 #include "atoms.h"
@@ -122,7 +124,7 @@ Workspace::Workspace()
 
 #if KWIN_BUILD_ACTIVITIES
     if (kwinApp()->usesKActivities()) {
-        m_activities = std::make_unique<Activities>(kwinApp()->config());
+        m_activities = std::make_unique<Activities>();
     }
     if (m_activities) {
         connect(m_activities.get(), &Activities::currentChanged, this, &Workspace::updateCurrentActivity);
@@ -206,28 +208,28 @@ void Workspace::init()
     //  load is needed to be called again when starting xwayalnd to sync to RootInfo, see BUG 385260
     vds->save();
 
-    if (waylandServer()) {
-        m_outputConfigStore = std::make_unique<OutputConfigurationStore>();
+    m_outputConfigStore = std::make_unique<OutputConfigurationStore>();
 
-        const auto applySensorChanges = [this]() {
-            m_orientationSensor->setEnabled(m_outputConfigStore->isAutoRotateActive(kwinApp()->outputBackend()->outputs(), kwinApp()->tabletModeManager()->effectiveTabletMode()));
-            auto opt = m_outputConfigStore->queryConfig(kwinApp()->outputBackend()->outputs(), m_lidSwitchTracker->isLidClosed(), m_orientationSensor->reading(), kwinApp()->tabletModeManager()->effectiveTabletMode());
-            if (opt) {
-                auto &[config, order, type] = *opt;
-                applyOutputConfiguration(config, order);
-            }
-        };
-        connect(m_lidSwitchTracker.get(), &LidSwitchTracker::lidStateChanged, this, applySensorChanges);
-        connect(m_orientationSensor.get(), &OrientationSensor::orientationChanged, this, applySensorChanges);
-        connect(kwinApp()->tabletModeManager(), &TabletModeManager::tabletModeChanged, this, applySensorChanges);
+    const auto applySensorChanges = [this]() {
         m_orientationSensor->setEnabled(m_outputConfigStore->isAutoRotateActive(kwinApp()->outputBackend()->outputs(), kwinApp()->tabletModeManager()->effectiveTabletMode()));
-        connect(m_orientationSensor.get(), &OrientationSensor::availableChanged, this, [this]() {
-            const auto outputs = kwinApp()->outputBackend()->outputs();
-            for (const auto output : outputs) {
-                output->setAutoRotateAvailable(m_orientationSensor->isAvailable());
-            }
-        });
-    }
+        auto opt = m_outputConfigStore->queryConfig(kwinApp()->outputBackend()->outputs(), m_lidSwitchTracker->isLidClosed(), m_orientationSensor->reading(), kwinApp()->tabletModeManager()->effectiveTabletMode());
+        if (opt) {
+            auto &[config, order, type] = *opt;
+            applyOutputConfiguration(config, order);
+        }
+    };
+    connect(m_lidSwitchTracker.get(), &LidSwitchTracker::lidStateChanged, this, applySensorChanges);
+    // NOTE that enabling or disabling the orientation sensor can trigger the orientation to change immediately.
+    // As we do enable or disable it in applySensorChanges, it must be done asynchronously / with a queued connection!
+    connect(m_orientationSensor.get(), &OrientationSensor::orientationChanged, this, applySensorChanges, Qt::QueuedConnection);
+    connect(kwinApp()->tabletModeManager(), &TabletModeManager::tabletModeChanged, this, applySensorChanges);
+    m_orientationSensor->setEnabled(m_outputConfigStore->isAutoRotateActive(kwinApp()->outputBackend()->outputs(), kwinApp()->tabletModeManager()->effectiveTabletMode()));
+    connect(m_orientationSensor.get(), &OrientationSensor::availableChanged, this, [this]() {
+        const auto outputs = kwinApp()->outputBackend()->outputs();
+        for (const auto output : outputs) {
+            output->setAutoRotateAvailable(m_orientationSensor->isAvailable());
+        }
+    });
 
     slotOutputBackendOutputsQueried();
     connect(kwinApp()->outputBackend(), &OutputBackend::outputsQueried, this, &Workspace::slotOutputBackendOutputsQueried);
@@ -258,10 +260,8 @@ void Workspace::init()
 
     Scripting::create(this);
 
-    if (auto server = waylandServer()) {
-        connect(server, &WaylandServer::windowAdded, this, &Workspace::addWaylandWindow);
-        connect(server, &WaylandServer::windowRemoved, this, &Workspace::removeWaylandWindow);
-    }
+    connect(waylandServer(), &WaylandServer::windowAdded, this, &Workspace::addWaylandWindow);
+    connect(waylandServer(), &WaylandServer::windowRemoved, this, &Workspace::removeWaylandWindow);
 
     // broadcast that Workspace is ready, but first process all events.
     QMetaObject::invokeMethod(this, &Workspace::workspaceInitialized, Qt::QueuedConnection);
@@ -270,25 +270,23 @@ void Workspace::init()
 
     connect(this, &Workspace::windowAdded, m_placementTracker.get(), &PlacementTracker::add);
     connect(this, &Workspace::windowRemoved, m_placementTracker.get(), &PlacementTracker::remove);
-    m_placementTracker->init(getPlacementTrackerHash());
+    m_placementTracker->init(outputLayoutId());
 
-    if (waylandServer()) {
-        connect(waylandServer()->externalBrightness(), &ExternalBrightnessV1::devicesChanged, this, &Workspace::updateOutputConfiguration);
+    connect(waylandServer()->externalBrightness(), &ExternalBrightnessV1::devicesChanged, this, &Workspace::updateOutputConfiguration);
 
-        m_kdeglobalsWatcher = KConfigWatcher::create(kwinApp()->kdeglobals());
-        connect(m_kdeglobalsWatcher.get(), &KConfigWatcher::configChanged, this, [this](const KConfigGroup &group, const QByteArrayList &names) {
-            if (group.name() == "KScreen" && names.contains(QByteArrayLiteral("XwaylandClientsScale"))) {
-                updateXwaylandScale();
-            }
-        });
-    }
+    m_kdeglobalsWatcher = KConfigWatcher::create(kwinApp()->kdeglobals());
+    connect(m_kdeglobalsWatcher.get(), &KConfigWatcher::configChanged, this, [this](const KConfigGroup &group, const QByteArrayList &names) {
+        if (group.name() == "KScreen" && names.contains(QByteArrayLiteral("XwaylandClientsScale"))) {
+            updateXwaylandScale();
+        }
+    });
 
 #if KWIN_BUILD_SCREENLOCKER
     connect(ScreenLocker::KSldApp::self(), &ScreenLocker::KSldApp::locked, this, &Workspace::slotEndInteractiveMoveResize);
 #endif
 }
 
-QString Workspace::getPlacementTrackerHash()
+QString Workspace::outputLayoutId() const
 {
     QStringList hashes;
     for (const auto &output : std::as_const(m_outputs)) {
@@ -391,10 +389,8 @@ Workspace::~Workspace()
     cleanupX11();
 #endif
 
-    if (waylandServer()) {
-        while (!waylandServer()->windows().isEmpty()) {
-            waylandServer()->windows()[0]->destroyWindow();
-        }
+    while (!waylandServer()->windows().isEmpty()) {
+        waylandServer()->windows()[0]->destroyWindow();
     }
 
     while (!m_windows.isEmpty()) {
@@ -413,6 +409,7 @@ Workspace::~Workspace()
     m_tileManagers.clear();
 
     for (Output *output : std::as_const(m_outputs)) {
+        Q_EMIT outputRemoved(output);
         output->unref();
     }
 
@@ -774,19 +771,24 @@ void Workspace::addWaylandWindow(Window *window)
     m_windows.append(window);
     addToStack(window);
 
+    const bool shouldActivate = window->wantsInput()
+        && ((mayActivate(window, window->activationToken()) && !window->isDesktop())
+            // focus stealing prevention "low" should always activate new windows
+            || (!window->isDesktop() && options->focusStealingPreventionLevel() <= FocusStealingPreventionLevel::Low)
+            // If there's no active window, make this desktop the active one.
+            || (activeWindow() == nullptr && should_get_focus.count() == 0));
+    if (!window->isMinimized() && !shouldActivate) {
+        // This window won't be activated, so move it out of the way
+        // of the active window
+        restackWindowUnderActive(window);
+    }
+
     updateStackingOrder(true);
     if (window->hasStrut()) {
         rearrange();
     }
-    if (window->wantsInput() && !window->isMinimized()) {
-        // Never activate a window on its own in "Extreme" mode.
-        if (options->focusStealingPreventionLevel() < 4) {
-            if (!window->isDesktop()
-                // If there's no active window, make this desktop the active one.
-                || (activeWindow() == nullptr && should_get_focus.count() == 0)) {
-                activateWindow(window);
-            }
-        }
+    if (!window->isMinimized() && shouldActivate) {
+        activateWindow(window);
     }
     updateTabbox();
     Q_EMIT windowAdded(window);
@@ -880,6 +882,63 @@ void Workspace::slotReconfigure()
 
 void Workspace::slotCurrentDesktopChanged(VirtualDesktop *oldDesktop, VirtualDesktop *newDesktop)
 {
+    updateWindowVisibilityAndActivateOnDesktopChange(newDesktop);
+    Q_EMIT currentDesktopChanged(oldDesktop, m_moveResizeWindow);
+}
+
+void Workspace::slotCurrentDesktopChanging(VirtualDesktop *currentDesktop, QPointF offset)
+{
+    closeActivePopup();
+    Q_EMIT currentDesktopChanging(currentDesktop, offset, m_moveResizeWindow);
+}
+
+void Workspace::slotCurrentDesktopChangingCancelled()
+{
+    Q_EMIT currentDesktopChangingCancelled();
+}
+
+void Workspace::updateWindowVisibilityOnDesktopChange(VirtualDesktop *newDesktop)
+{
+#if KWIN_BUILD_X11
+    for (auto it = stacking_order.constBegin(); it != stacking_order.constEnd(); ++it) {
+        X11Window *c = qobject_cast<X11Window *>(*it);
+        if (!c) {
+            continue;
+        }
+        if (!(c->isOnDesktop(newDesktop) && c->isOnCurrentActivity()) && c != m_moveResizeWindow) {
+            (c)->updateVisibility();
+        }
+    }
+    // Now propagate the change, after hiding, before showing
+    if (rootInfo()) {
+        rootInfo()->setCurrentDesktop(VirtualDesktopManager::self()->current());
+    }
+#endif
+
+    // FIXME: Keep Move/Resize window across activities
+
+    if (m_moveResizeWindow && !m_moveResizeWindow->isOnDesktop(newDesktop)) {
+        m_moveResizeWindow->setDesktops({newDesktop});
+    }
+
+#if KWIN_BUILD_X11
+    for (int i = stacking_order.size() - 1; i >= 0; --i) {
+        X11Window *c = qobject_cast<X11Window *>(stacking_order.at(i));
+        if (!c) {
+            continue;
+        }
+        if (c->isOnDesktop(newDesktop) && c->isOnCurrentActivity()) {
+            c->updateVisibility();
+        }
+    }
+#endif
+    if (showingDesktop()) { // Do this only after desktop change to avoid flicker
+        setShowingDesktop(false);
+    }
+}
+
+void Workspace::updateWindowVisibilityAndActivateOnDesktopChange(VirtualDesktop *newDesktop)
+{
     closeActivePopup();
     ++block_focus;
     StackingUpdatesBlocker blocker(this);
@@ -903,56 +962,6 @@ void Workspace::slotCurrentDesktopChanged(VirtualDesktop *oldDesktop, VirtualDes
     }
 
     activateWindowOnDesktop(newDesktop);
-    Q_EMIT currentDesktopChanged(oldDesktop, m_moveResizeWindow);
-}
-
-void Workspace::slotCurrentDesktopChanging(VirtualDesktop *currentDesktop, QPointF offset)
-{
-    closeActivePopup();
-    Q_EMIT currentDesktopChanging(currentDesktop, offset, m_moveResizeWindow);
-}
-
-void Workspace::slotCurrentDesktopChangingCancelled()
-{
-    Q_EMIT currentDesktopChangingCancelled();
-}
-
-void Workspace::updateWindowVisibilityOnDesktopChange(VirtualDesktop *newDesktop)
-{
-#if KWIN_BUILD_X11
-    for (auto it = stacking_order.constBegin(); it != stacking_order.constEnd(); ++it) {
-        X11Window *c = qobject_cast<X11Window *>(*it);
-        if (!c) {
-            continue;
-        }
-        if (!c->isOnDesktop(newDesktop) && c != m_moveResizeWindow && c->isOnCurrentActivity()) {
-            (c)->updateVisibility();
-        }
-    }
-    // Now propagate the change, after hiding, before showing
-    if (rootInfo()) {
-        rootInfo()->setCurrentDesktop(VirtualDesktopManager::self()->current());
-    }
-#endif
-
-    if (m_moveResizeWindow && !m_moveResizeWindow->isOnDesktop(newDesktop)) {
-        m_moveResizeWindow->setDesktops({newDesktop});
-    }
-
-#if KWIN_BUILD_X11
-    for (int i = stacking_order.size() - 1; i >= 0; --i) {
-        X11Window *c = qobject_cast<X11Window *>(stacking_order.at(i));
-        if (!c) {
-            continue;
-        }
-        if (c->isOnDesktop(newDesktop) && c->isOnCurrentActivity()) {
-            c->updateVisibility();
-        }
-    }
-#endif
-    if (showingDesktop()) { // Do this only after desktop change to avoid flicker
-        setShowingDesktop(false);
-    }
 }
 
 void Workspace::activateWindowOnDesktop(VirtualDesktop *desktop)
@@ -964,7 +973,7 @@ void Workspace::activateWindowOnDesktop(VirtualDesktop *desktop)
     // If "unreasonable focus policy" and m_activeWindow is on_all_desktops and
     // under mouse (Hence == old_active_window), conserve focus.
     // (Thanks to Volker Schatz <V.Schatz at thphys.uni-heidelberg.de>)
-    else if (m_activeWindow && m_activeWindow->isShown() && m_activeWindow->isOnCurrentDesktop()) {
+    else if (m_activeWindow && m_activeWindow->isShown() && m_activeWindow->isOnCurrentDesktop() && m_activeWindow->isOnCurrentActivity()) {
         window = m_activeWindow;
     }
 
@@ -985,11 +994,11 @@ void Workspace::activateWindowOnDesktop(VirtualDesktop *desktop)
 
 Window *Workspace::findWindowToActivateOnDesktop(VirtualDesktop *desktop)
 {
-    if (m_moveResizeWindow != nullptr && m_activeWindow == m_moveResizeWindow && m_focusChain->contains(m_activeWindow, desktop) && m_activeWindow->isShown() && m_activeWindow->isOnCurrentDesktop()) {
+    if (m_moveResizeWindow != nullptr && m_activeWindow == m_moveResizeWindow && m_focusChain->contains(m_activeWindow, desktop) && m_activeWindow->isShown() && m_activeWindow->isOnCurrentDesktop() && m_activeWindow->isOnCurrentActivity()) {
         // A requestFocus call will fail, as the window is already active
         return m_activeWindow;
     }
-    // from actiavtion.cpp
+    // from activation.cpp
     if (options->isNextFocusPrefersMouse()) {
         auto it = stackingOrder().constEnd();
         while (it != stackingOrder().constBegin()) {
@@ -998,7 +1007,7 @@ Window *Workspace::findWindowToActivateOnDesktop(VirtualDesktop *desktop)
                 continue;
             }
 
-            if (!(!window->isShade() && window->isShown() && window->isOnDesktop(desktop) && window->isOnCurrentActivity() && window->isOnActiveOutput())) {
+            if (!(window->isShown() && window->isOnDesktop(desktop) && window->isOnCurrentActivity() && window->isOnActiveOutput())) {
                 continue;
             }
 
@@ -1026,77 +1035,8 @@ void Workspace::updateCurrentActivity(const QString &new_activity)
     if (!m_activities) {
         return;
     }
-    // closeActivePopup();
-    ++block_focus;
-    // TODO: Q_ASSERT( block_stacking_updates == 0 ); // Make sure stacking_order is up to date
-    StackingUpdatesBlocker blocker(this);
 
-    // Optimized Desktop switching: unmapping done from back to front
-    // mapping done from front to back => less exposure events
-    // Notify::raise((Notify::Event) (Notify::DesktopChange+new_desktop));
-
-#if KWIN_BUILD_X11
-    for (auto it = stacking_order.constBegin(); it != stacking_order.constEnd(); ++it) {
-        X11Window *window = qobject_cast<X11Window *>(*it);
-        if (!window) {
-            continue;
-        }
-        if (!window->isOnActivity(new_activity) && window != m_moveResizeWindow && window->isOnCurrentDesktop()) {
-            window->updateVisibility();
-        }
-    }
-
-    // Now propagate the change, after hiding, before showing
-    // rootInfo->setCurrentDesktop( currentDesktop() );
-
-    /* TODO someday enable dragging windows to other activities
-    if ( m_moveResizeWindow && !m_moveResizeWindow->isOnDesktop( new_desktop ))
-        {
-        m_moveResizeWindow->setDesktop( new_desktop );
-        */
-
-    for (int i = stacking_order.size() - 1; i >= 0; --i) {
-        X11Window *window = qobject_cast<X11Window *>(stacking_order.at(i));
-        if (!window) {
-            continue;
-        }
-        if (window->isOnActivity(new_activity)) {
-            window->updateVisibility();
-        }
-    }
-#endif
-
-    // FIXME not sure if I should do this either
-    if (showingDesktop()) { // Do this only after desktop change to avoid flicker
-        setShowingDesktop(false);
-    }
-
-    // Restore the focus on this desktop
-    --block_focus;
-    Window *window = nullptr;
-
-    // FIXME below here is a lot of focuschain stuff, probably all wrong now
-    //  Keep active window focused if it's on the new activity
-    if (m_activeWindow && m_activeWindow->isShown() && m_activeWindow->isOnCurrentDesktop() && m_activeWindow->isOnCurrentActivity()) {
-        window = m_activeWindow;
-    } else if (options->focusPolicyIsReasonable()) {
-        // Search in focus chain
-        window = m_focusChain->getForActivation(VirtualDesktopManager::self()->currentDesktop());
-    }
-
-    if (!window) {
-        window = findDesktop(VirtualDesktopManager::self()->currentDesktop(), activeOutput());
-    }
-
-    if (window != m_activeWindow) {
-        setActiveWindow(nullptr);
-    }
-
-    if (window) {
-        requestFocus(window);
-    } else {
-        focusToNull();
-    }
+    updateWindowVisibilityAndActivateOnDesktopChange(VirtualDesktopManager::self()->currentDesktop());
 
     Q_EMIT currentActivityChanged();
 #endif
@@ -1190,9 +1130,7 @@ Output *Workspace::findOutput(Output *reference, Direction direction, bool wrapA
 
 void Workspace::slotOutputBackendOutputsQueried()
 {
-    if (waylandServer()) {
-        updateOutputConfiguration();
-    }
+    updateOutputConfiguration();
     updateOutputs();
 }
 
@@ -1201,11 +1139,8 @@ void Workspace::updateOutputs(const std::optional<QList<Output *>> &outputOrder)
     const auto availableOutputs = kwinApp()->outputBackend()->outputs();
     const auto oldOutputs = m_outputs;
 
-    // On X11, we receive spurious output change events when windows move around.
-    if (waylandServer()) {
-        if (m_moveResizeWindow) {
-            m_moveResizeWindow->cancelInteractiveMoveResize();
-        }
+    if (m_moveResizeWindow) {
+        m_moveResizeWindow->cancelInteractiveMoveResize();
     }
 
     m_outputs.clear();
@@ -1232,7 +1167,7 @@ void Workspace::updateOutputs(const std::optional<QList<Output *>> &outputOrder)
         }
     }
 
-    if (!m_activeOutput || !m_outputs.contains(m_activeOutput)) {
+    if (!m_activeOutput) {
         setActiveOutput(m_outputs[0]);
     }
 
@@ -1320,7 +1255,7 @@ void Workspace::updateOutputs(const std::optional<QList<Output *>> &outputOrder)
     desktopResized();
 
     m_placementTracker->uninhibit();
-    m_placementTracker->restore(getPlacementTrackerHash());
+    m_placementTracker->restore(outputLayoutId());
 
     for (Output *output : removed) {
         output->unref();
@@ -1362,7 +1297,8 @@ void Workspace::assignBrightnessDevices(OutputConfiguration &outputConfig)
                 return false;
             }
             const auto changeset = outputConfig.constChangeSet(output);
-            const bool disallowDdcCi = (changeset && !changeset->allowDdcCi.value_or(output->allowDdcCi()))
+            const bool disallowDdcCi = output->isDdcCiKnownBroken()
+                || (changeset && !changeset->allowDdcCi.value_or(output->allowDdcCi()))
                 || (!changeset && !output->allowDdcCi());
             if (disallowDdcCi && device->usesDdcCi()) {
                 return false;
@@ -1440,16 +1376,10 @@ void Workspace::selectWmInputEventMask()
         presentMask = attr->your_event_mask;
     }
 
-    uint32_t wmMask = XCB_EVENT_MASK_PROPERTY_CHANGE
+    const uint32_t wmMask = XCB_EVENT_MASK_PROPERTY_CHANGE
         | XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT
         | XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY
         | XCB_EVENT_MASK_FOCUS_CHANGE; // For NotifyDetailNone
-
-    if (!waylandServer()) {
-        wmMask |= XCB_EVENT_MASK_KEY_PRESS
-            | XCB_EVENT_MASK_COLOR_MAP_CHANGE
-            | XCB_EVENT_MASK_EXPOSURE;
-    }
 
     Xcb::selectInput(kwinApp()->x11RootWindow(), presentMask | wmMask);
 }
@@ -1491,7 +1421,7 @@ void Workspace::sendWindowToDesktops(Window *window, const QList<VirtualDesktop 
     }
 
     if (window->isOnCurrentDesktop()) {
-        if (window->wantsTabFocus() && options->focusPolicyIsReasonable() && !wasOnCurrent && // for stickyness changes
+        if (window->wantsTabFocus() && options->focusPolicyIsReasonable() && !wasOnCurrent && // for stickiness changes
             !dont_activate) {
             requestFocus(window);
         } else {
@@ -1562,6 +1492,16 @@ void Workspace::focusToNull()
     }
 #endif
 }
+
+#if KWIN_BUILD_X11
+xcb_window_t Workspace::nullFocusWindow() const
+{
+    if (!m_nullFocus) {
+        return XCB_WINDOW_NONE;
+    }
+    return *m_nullFocus;
+}
+#endif
 
 bool Workspace::breaksShowingDesktop(Window *window) const
 {
@@ -2137,19 +2077,21 @@ void Workspace::desktopResized()
 
     rearrange();
 
+    if (!m_outputs.contains(m_activeOutput)) {
+        setActiveOutput(m_outputs[0]);
+    }
+
     const auto stack = stackingOrder();
     for (Window *window : stack) {
         window->setMoveResizeOutput(outputAt(window->moveResizeGeometry().center()));
         window->setOutput(outputAt(window->frameGeometry().center()));
     }
 
-    if (waylandServer()) {
-        // TODO: Track uninitialized windows in the Workspace too.
-        const auto windows = waylandServer()->windows();
-        for (Window *window : windows) {
-            window->setMoveResizeOutput(outputAt(window->moveResizeGeometry().center()));
-            window->setOutput(outputAt(window->frameGeometry().center()));
-        }
+    // TODO: Track uninitialized windows in the Workspace too.
+    const auto windows = waylandServer()->windows();
+    for (Window *window : windows) {
+        window->setMoveResizeOutput(outputAt(window->moveResizeGeometry().center()));
+        window->setOutput(outputAt(window->frameGeometry().center()));
     }
 
     // restore cursor position

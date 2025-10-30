@@ -21,7 +21,7 @@
 #include "window.h"
 #include "workspace.h"
 #if KWIN_BUILD_SCREENLOCKER
-#include "screenlockerwatcher.h"
+#include <KScreenLocker/KsldApp>
 #endif
 
 #include "internalinputmethodcontext.h"
@@ -54,39 +54,30 @@
 namespace KWin
 {
 
-static std::vector<quint32> textToKey(const QString &text)
+static QList<xkb_keysym_t> textToKey(const QString &inputString)
 {
-    if (text.isEmpty()) {
-        return {};
-    }
+    QList<xkb_keysym_t> result;
 
-    auto sequence = QKeySequence::fromString(text);
-    if (sequence.isEmpty()) {
-        return {};
-    }
+    for (int i = 0; i < inputString.size(); ++i) {
+        char32_t cp = inputString[i].unicode();
 
-    const QList<xkb_keysym_t> syms = KWin::Xkb::keysymsFromQtKey(sequence[0]);
-    if (syms.empty()) {
-        return {};
-    }
+        // Handle surrogate pair (two QChars → one codepoint)
+        if (inputString[i].isHighSurrogate() && i + 1 < inputString.size()
+            && inputString[i+1].isLowSurrogate())
+        {
+            cp = QChar::surrogateToUcs4(inputString[i].unicode(),
+                                        inputString[i+1].unicode());
+            i++; // skip the low surrogate
+        }
 
-    std::optional<xkb_keycode_t> keyCode;
-    for (xkb_keysym_t sym : syms) {
-        auto code = input()->keyboard()->xkb()->keycodeFromKeysym(sym);
-        if (code) {
-            keyCode = code->first;
-            break;
+        xkb_keysym_t ks = xkb_utf32_to_keysym(cp);
+        if (ks != XKB_KEY_NoSymbol) {
+            result.append(ks);
+        } else {
+            qCWarning(KWIN_VIRTUALKEYBOARD) << "No keysym for U+" << Qt::hex << (int)cp << "\n";
         }
     }
-    if (!keyCode) {
-        return {};
-    }
-
-    if (text.isUpper()) {
-        return {KEY_LEFTSHIFT, quint32(keyCode.value())};
-    }
-
-    return {quint32(keyCode.value())};
+    return result;
 }
 
 InputMethod::InputMethod()
@@ -118,64 +109,71 @@ void InputMethod::init()
         m_inputMethodCrashes = 0;
     });
 #if KWIN_BUILD_SCREENLOCKER
-    connect(kwinApp()->screenLockerWatcher(), &ScreenLockerWatcher::aboutToLock, this, &InputMethod::hide);
+    connect(ScreenLocker::KSldApp::self(), &ScreenLocker::KSldApp::aboutToLock, this, &InputMethod::hide);
 #endif
 
     new VirtualKeyboardDBus(this);
     qCDebug(KWIN_VIRTUALKEYBOARD) << "Registering the DBus interface";
 
-    if (waylandServer()) {
-        new TextInputManagerV1Interface(waylandServer()->display(), this);
-        new TextInputManagerV2Interface(waylandServer()->display(), this);
-        new TextInputManagerV3Interface(waylandServer()->display(), this);
+    new TextInputManagerV1Interface(waylandServer()->display(), this);
+    new TextInputManagerV2Interface(waylandServer()->display(), this);
+    new TextInputManagerV3Interface(waylandServer()->display(), this);
 
-        connect(waylandServer()->seat(), &SeatInterface::focusedKeyboardSurfaceAboutToChange, this, &InputMethod::commitPendingText);
-        connect(waylandServer()->seat(), &SeatInterface::focusedTextInputSurfaceChanged, this, &InputMethod::handleFocusedSurfaceChanged);
+    connect(waylandServer()->seat(), &SeatInterface::focusedKeyboardSurfaceAboutToChange, this, &InputMethod::commitPendingText);
+    connect(waylandServer()->seat(), &SeatInterface::focusedTextInputSurfaceChanged, this, &InputMethod::handleFocusedSurfaceChanged);
 
-        TextInputV1Interface *textInputV1 = waylandServer()->seat()->textInputV1();
-        connect(textInputV1, &TextInputV1Interface::requestShowInputPanel, this, &InputMethod::show);
-        connect(textInputV1, &TextInputV1Interface::requestHideInputPanel, this, &InputMethod::hide);
-        connect(textInputV1, &TextInputV1Interface::surroundingTextChanged, this, &InputMethod::surroundingTextChanged);
-        connect(textInputV1, &TextInputV1Interface::contentTypeChanged, this, &InputMethod::contentTypeChanged);
-        connect(textInputV1, &TextInputV1Interface::stateUpdated, this, &InputMethod::textInputInterfaceV1StateUpdated);
-        connect(textInputV1, &TextInputV1Interface::reset, this, &InputMethod::textInputInterfaceV1Reset);
-        connect(textInputV1, &TextInputV1Interface::invokeAction, this, &InputMethod::invokeAction);
-        connect(textInputV1, &TextInputV1Interface::enabledChanged, this, &InputMethod::textInputInterfaceV1EnabledChanged);
+    TextInputV1Interface *textInputV1 = waylandServer()->seat()->textInputV1();
+    connect(textInputV1, &TextInputV1Interface::requestShowInputPanel, this, &InputMethod::show);
+    connect(textInputV1, &TextInputV1Interface::requestHideInputPanel, this, &InputMethod::hide);
+    connect(textInputV1, &TextInputV1Interface::surroundingTextChanged, this, &InputMethod::surroundingTextChanged);
+    connect(textInputV1, &TextInputV1Interface::contentTypeChanged, this, &InputMethod::contentTypeChanged);
+    connect(textInputV1, &TextInputV1Interface::stateUpdated, this, &InputMethod::textInputInterfaceV1StateUpdated);
+    connect(textInputV1, &TextInputV1Interface::reset, this, &InputMethod::textInputInterfaceV1Reset);
+    connect(textInputV1, &TextInputV1Interface::invokeAction, this, &InputMethod::invokeAction);
+    connect(textInputV1, &TextInputV1Interface::enabledChanged, this, &InputMethod::textInputInterfaceV1EnabledChanged);
+    connect(textInputV1, &TextInputV1Interface::cursorRectangleChanged, this, &InputMethod::cursorRectangleChanged);
 
-        TextInputV2Interface *textInputV2 = waylandServer()->seat()->textInputV2();
-        connect(textInputV2, &TextInputV2Interface::requestShowInputPanel, this, &InputMethod::show);
-        connect(textInputV2, &TextInputV2Interface::requestHideInputPanel, this, &InputMethod::hide);
-        connect(textInputV2, &TextInputV2Interface::surroundingTextChanged, this, &InputMethod::surroundingTextChanged);
-        connect(textInputV2, &TextInputV2Interface::contentTypeChanged, this, &InputMethod::contentTypeChanged);
-        connect(textInputV2, &TextInputV2Interface::stateUpdated, this, &InputMethod::textInputInterfaceV2StateUpdated);
-        connect(textInputV2, &TextInputV2Interface::enabledChanged, this, &InputMethod::textInputInterfaceV2EnabledChanged);
+    TextInputV2Interface *textInputV2 = waylandServer()->seat()->textInputV2();
+    connect(textInputV2, &TextInputV2Interface::requestShowInputPanel, this, &InputMethod::show);
+    connect(textInputV2, &TextInputV2Interface::requestHideInputPanel, this, &InputMethod::hide);
+    connect(textInputV2, &TextInputV2Interface::surroundingTextChanged, this, &InputMethod::surroundingTextChanged);
+    connect(textInputV2, &TextInputV2Interface::contentTypeChanged, this, &InputMethod::contentTypeChanged);
+    connect(textInputV2, &TextInputV2Interface::stateUpdated, this, &InputMethod::textInputInterfaceV2StateUpdated);
+    connect(textInputV2, &TextInputV2Interface::enabledChanged, this, &InputMethod::textInputInterfaceV2EnabledChanged);
+    connect(textInputV2, &TextInputV2Interface::cursorRectangleChanged, this, &InputMethod::cursorRectangleChanged);
 
-        TextInputV3Interface *textInputV3 = waylandServer()->seat()->textInputV3();
-        connect(textInputV3, &TextInputV3Interface::surroundingTextChanged, this, &InputMethod::surroundingTextChanged);
-        connect(textInputV3, &TextInputV3Interface::contentTypeChanged, this, &InputMethod::contentTypeChanged);
-        connect(textInputV3, &TextInputV3Interface::stateCommitted, this, &InputMethod::stateCommitted);
-        connect(textInputV3, &TextInputV3Interface::enabledChanged, this, &InputMethod::textInputInterfaceV3EnabledChanged);
-        connect(textInputV3, &TextInputV3Interface::enableRequested, this, &InputMethod::textInputInterfaceV3EnableRequested);
+    TextInputV3Interface *textInputV3 = waylandServer()->seat()->textInputV3();
+    connect(textInputV3, &TextInputV3Interface::surroundingTextChanged, this, &InputMethod::surroundingTextChanged);
+    connect(textInputV3, &TextInputV3Interface::contentTypeChanged, this, &InputMethod::contentTypeChanged);
+    connect(textInputV3, &TextInputV3Interface::stateCommitted, this, &InputMethod::stateCommitted);
+    connect(textInputV3, &TextInputV3Interface::enabledChanged, this, &InputMethod::textInputInterfaceV3EnabledChanged);
+    connect(textInputV3, &TextInputV3Interface::enableRequested, this, &InputMethod::textInputInterfaceV3EnableRequested);
+    connect(textInputV3, &TextInputV3Interface::cursorRectangleChanged, this, &InputMethod::cursorRectangleChanged);
 
-        connect(m_internalContext, &InternalInputMethodContext::surroundingTextChanged, this, &InputMethod::surroundingTextChanged);
-        connect(m_internalContext, &InternalInputMethodContext::contentTypeChanged, this, &InputMethod::contentTypeChanged);
-        connect(m_internalContext, &InternalInputMethodContext::enabledChanged, this, &InputMethod::refreshActive);
-        connect(m_internalContext, &InternalInputMethodContext::showInputPanelRequested, this, &InputMethod::show);
-        connect(m_internalContext, &InternalInputMethodContext::hideInputPanelRequested, this, &InputMethod::hide);
+    connect(m_internalContext, &InternalInputMethodContext::surroundingTextChanged, this, &InputMethod::surroundingTextChanged);
+    connect(m_internalContext, &InternalInputMethodContext::contentTypeChanged, this, &InputMethod::contentTypeChanged);
+    connect(m_internalContext, &InternalInputMethodContext::enabledChanged, this, &InputMethod::refreshActive);
+    connect(m_internalContext, &InternalInputMethodContext::showInputPanelRequested, this, &InputMethod::show);
+    connect(m_internalContext, &InternalInputMethodContext::hideInputPanelRequested, this, &InputMethod::hide);
 
-        connect(input()->keyboard()->xkb(), &Xkb::modifierStateChanged, this, [this]() {
-            m_hasPendingModifiers = true;
-        });
-    }
+    connect(input()->keyboard()->xkb(), &Xkb::modifierStateChanged, this, [this]() {
+        m_hasPendingModifiers = true;
+    });
 }
 
 void InputMethod::show()
 {
     m_shouldShowPanel = true;
-    if (m_panel) {
+
+    // If the panel has something to display, show it (e.g. if we hid it from kwin rather than the IM hiding itself)
+    // Otherwise, ensure the input context is current and the IM will see to having itself shown if there's something to show.
+    // If there's no context available, then nothing will be shown
+    if (m_panel && !m_panel->wasUnmapped()) {
         m_panel->show();
         updateInputPanelState();
     } else {
+        // making the input context current will trigger the IM
+        // to show the panel (if there is something to show)
         if (!isActive()) {
             refreshActive();
         }
@@ -253,6 +251,32 @@ void InputMethod::commitPendingText()
     }
 }
 
+QRect InputMethod::cursorRectangle() const
+{
+    QRect localCursorRect;
+    auto t1 = waylandServer()->seat()->textInputV1();
+    auto t2 = waylandServer()->seat()->textInputV2();
+    auto t3 = waylandServer()->seat()->textInputV3();
+    auto inputContext = waylandServer()->inputMethod()->context();
+    if (!inputContext) {
+        return {};
+    }
+    if (t1 && t1->isEnabled()) {
+        localCursorRect = t1->cursorRectangle();
+    }
+    if (t2 && t2->isEnabled()) {
+        localCursorRect = t2->cursorRectangle();
+    }
+    if (t3 && t3->isEnabled()) {
+        localCursorRect = t3->cursorRectangle();
+    }
+
+    if (auto textWindow = waylandServer()->findWindow(waylandServer()->seat()->focusedTextInputSurface())) {
+        return localCursorRect.translated(textWindow->bufferGeometry().topLeft().toPoint());
+    }
+    return {};
+}
+
 void InputMethod::setActive(bool active)
 {
     const bool wasActive = waylandServer()->inputMethod()->context();
@@ -288,20 +312,19 @@ void InputMethod::setPanel(InputPanelV1Window *panel)
     Q_ASSERT(panel->isInputMethod());
     if (m_panel) {
         qCWarning(KWIN_VIRTUALKEYBOARD) << "Replacing input panel" << m_panel << "with" << panel;
-        disconnect(m_panel, nullptr, this, nullptr);
+        m_panel->destroyWindow();
     }
 
     m_panel = panel;
-    connect(panel, &Window::closed, this, [this]() {
-        if (m_trackedWindow) {
-            m_trackedWindow->setVirtualKeyboardGeometry({});
-        }
+    connect(m_panel, &Window::closed, this, [this]() {
+        m_panel.clear();
+        updateInputPanelState();
+        Q_EMIT visibleChanged();
     });
     connect(m_panel, &Window::frameGeometryChanged, this, &InputMethod::updateInputPanelState);
     connect(m_panel, &Window::hiddenChanged, this, &InputMethod::updateInputPanelState);
-    connect(m_panel, &Window::closed, this, &InputMethod::updateInputPanelState);
     connect(m_panel, &Window::hiddenChanged, this, &InputMethod::visibleChanged);
-    connect(m_panel, &Window::closed, this, &InputMethod::visibleChanged);
+    connect(m_panel, &Window::readyForPaintingChanged, this, &InputMethod::visibleChanged);
     Q_EMIT visibleChanged();
     updateInputPanelState();
     Q_EMIT panelChanged();
@@ -313,7 +336,7 @@ void InputMethod::setPanel(InputPanelV1Window *panel)
 
 void InputMethod::setTrackedWindow(Window *trackedWindow)
 {
-    // Reset the old window virtual keybaord geom if necessary
+    // Reset the old window virtual keyboard geom if necessary
     // Old and new windows could be the same if focus moves between subsurfaces
     if (m_trackedWindow == trackedWindow) {
         return;
@@ -321,13 +344,16 @@ void InputMethod::setTrackedWindow(Window *trackedWindow)
     if (m_trackedWindow) {
         m_trackedWindow->setVirtualKeyboardGeometry(QRect());
         disconnect(m_trackedWindow, &Window::frameGeometryChanged, this, &InputMethod::updateInputPanelState);
+        disconnect(m_trackedWindow, &Window::frameGeometryChanged, this, &InputMethod::cursorRectangleChanged);
     }
     m_trackedWindow = trackedWindow;
     m_shouldShowPanel = false;
     if (m_trackedWindow) {
         connect(m_trackedWindow, &Window::frameGeometryChanged, this, &InputMethod::updateInputPanelState, Qt::QueuedConnection);
+        connect(m_trackedWindow, &Window::frameGeometryChanged, this, &InputMethod::cursorRectangleChanged);
     }
     updateInputPanelState();
+    Q_EMIT activeWindowChanged();
 }
 
 void InputMethod::handleFocusedSurfaceChanged()
@@ -341,14 +367,17 @@ void InputMethod::handleFocusedSurfaceChanged()
     setTrackedWindow(waylandServer()->findWindow(focusedSurface));
 
     const auto client = focusedSurface ? focusedSurface->client() : nullptr;
-    bool ret = seat->textInputV2()->clientSupportsTextInput(client)
-            || seat->textInputV3()->clientSupportsTextInput(client)
-            || m_internalContext->isEnabled();
+    bool ret = seat->textInputV1()->clientSupportsTextInput(client)
+        || seat->textInputV2()->clientSupportsTextInput(client)
+        || seat->textInputV3()->clientSupportsTextInput(client)
+        || m_internalContext->isEnabled();
 
     if (ret != m_activeClientSupportsTextInput) {
         m_activeClientSupportsTextInput = ret;
         Q_EMIT activeClientSupportsTextInputChanged();
     }
+
+    refreshActive();
 }
 
 void InputMethod::surroundingTextChanged()
@@ -606,7 +635,7 @@ void InputMethod::keysymReceived(quint32 serial, quint32 time, quint32 sym, bool
     } else {
         state = KeyboardKeyState::Released;
     }
-    waylandServer()->seat()->notifyKeyboardKey(keysymToKeycode(sym), state);
+    waylandServer()->seat()->notifyKeyboardKey(keysymToKeycode(sym), state, waylandServer()->display()->nextSerial());
 }
 
 void InputMethod::commitString(qint32 serial, const QString &text)
@@ -634,27 +663,32 @@ void InputMethod::commitString(qint32 serial, const QString &text)
         // The application has no way of communicating with the input method.
         // So instead, try to convert what we get from the input method into
         // keycodes and send those as fake input to the client.
-        auto keys = textToKey(text);
-        if (keys.empty()) {
-            return;
-        }
+
+        const QList<xkb_keysym_t> keySyms = textToKey(text);
 
         // First, send all the extracted keys as pressed keys to the client.
-        for (const auto &key : keys) {
-            waylandServer()->seat()->notifyKeyboardKey(key, KeyboardKeyState::Pressed);
+        for (const xkb_keysym_t &keySym : keySyms) {
+            std::optional<Xkb::KeyCode> keyCode = input()->keyboard()->xkb()->keycodeFromKeysym(keySym);
+            if (!keyCode) {
+                qCWarning(KWIN_VIRTUALKEYBOARD) << "Could not map keysym " << keySym << "to keycode. Trying custom keymap";
+                static const uint unmappedKeyCode = 247;
+                auto temporaryKeymap = input()->keyboard()->xkb()->createKeymapForKeysym(unmappedKeyCode, keySym);
+                if (temporaryKeymap.isEmpty()) {
+                    continue;
+                }
+                waylandServer()->seat()->keyboard()->setKeymap(temporaryKeymap);
+                waylandServer()->seat()->notifyKeyboardKey(unmappedKeyCode, KeyboardKeyState::Pressed, waylandServer()->display()->nextSerial());
+                waylandServer()->seat()->notifyKeyboardKey(unmappedKeyCode, KeyboardKeyState::Released, waylandServer()->display()->nextSerial());
+                waylandServer()->seat()->keyboard()->setKeymap(input()->keyboard()->xkb()->keymapContents());
+            } else {
+                waylandServer()->seat()->notifyKeyboardModifiers(keyCode->modifiers , 0, 0, input()->keyboard()->xkb()->currentLayout());
+                waylandServer()->seat()->notifyKeyboardKey(keyCode->keyCode, KeyboardKeyState::Pressed, waylandServer()->display()->nextSerial());
+                waylandServer()->seat()->notifyKeyboardKey(keyCode->keyCode, KeyboardKeyState::Released, waylandServer()->display()->nextSerial());
+            }
         }
 
-        // Then, send key release for those keys in reverse.
-        for (auto itr = keys.rbegin(); itr != keys.rend(); ++itr) {
-            // Since we are faking key events, we do not have distinct press/release
-            // events. So instead, just queue the button release so it gets sent
-            // a few moments after the press.
-            auto key = *itr;
-            QMetaObject::invokeMethod(
-                this, [key]() {
-                waylandServer()->seat()->notifyKeyboardKey(key, KeyboardKeyState::Released);
-            }, Qt::QueuedConnection);
-        }
+        // reset any modifiers to the actual state
+        input()->keyboard()->xkb()->forwardModifiers();
     }
 }
 
@@ -663,7 +697,7 @@ void InputMethod::deleteSurroundingText(int32_t index, uint32_t length)
     // zwp_input_method_v1 Delete surrounding text interface is designed for text-input-v1.
     // The parameter has different meaning in text-input-v{2,3}.
     // Current cursor is at index 0.
-    // The actualy deleted text range is [index, index + length].
+    // The actually deleted text range is [index, index + length].
     // In v{2,3}'s before/after style, text to be deleted with v{2,3} interface is [-before, after].
     // And before/after are all unsigned, which make it impossible to do certain things.
     // Those request will be ignored.
@@ -827,7 +861,8 @@ void InputMethod::key(quint32 /*serial*/, quint32 time, quint32 keyCode, bool pr
     }
 
     waylandServer()->seat()->notifyKeyboardKey(keyCode,
-                                               pressed ? KeyboardKeyState::Pressed : KeyboardKeyState::Released);
+                                               pressed ? KeyboardKeyState::Pressed : KeyboardKeyState::Released,
+                                               waylandServer()->display()->nextSerial());
 }
 
 void InputMethod::modifiers(quint32 serial, quint32 mods_depressed, quint32 mods_latched, quint32 mods_locked, quint32 group)
@@ -903,16 +938,6 @@ void InputMethod::adoptInputMethodContext()
 
 void InputMethod::updateInputPanelState()
 {
-    if (!waylandServer()) {
-        return;
-    }
-
-    auto t = waylandServer()->seat()->textInputV2();
-
-    if (!t) {
-        return;
-    }
-
     if (m_panel && shouldShowOnActive()) {
         m_panel->allow();
     }
@@ -926,6 +951,11 @@ void InputMethod::updateInputPanelState()
             overlap = m_trackedWindow->frameGeometry() & m_panel->frameGeometry();
             overlap.moveTo(m_trackedWindow->mapToLocal(overlap.topLeft()));
         }
+    }
+
+    auto t = waylandServer()->seat()->textInputV2();
+    if (!t) {
+        return;
     }
     t->setInputPanelState(m_panel && m_panel->isShown(), overlap.toRect());
 }

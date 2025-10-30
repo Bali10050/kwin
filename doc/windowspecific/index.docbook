@@ -10,7 +10,7 @@
 <author>&Lauri.Watts; &Lauri.Watts.mail;</author>
 <author>
 <personname>
-      <firstname>Parts of this documentation was converted from the KDE UserBase <ulink url="https://userbase.kde.org/KWin Rules">KWin Rules</ulink> page and updated by the &kde; Documentation team to Plasma 5.8.</firstname>
+      <firstname>Parts of this documentation was converted from the KDE UserBase <ulink url="https://userbase.kde.org/KWin_Rules">KWin Rules</ulink> page and updated by the &kde; Documentation team to Plasma 5.8.</firstname>
 <surname></surname>
 </personname>
       </author>
@@ -80,7 +80,7 @@ and <guibutton>Move Down</guibutton> buttons effects on how they are applied.</p
 <chapter id="examples-and-application-workaround"><title>Examples and Application Workaround</title> 
 <para>To see what's possible, detailed <link linkend="examples">examples</link> are provided which can also be used to model your own rules.
 </para>
-<para>A special page is to dedicated to address <link linkend="application-workarounds">Application Workaround</link>.
+<para>A special page is dedicated to address <link linkend="application-workarounds">Application Workaround</link>.
 </para>
 </chapter>
 <chapter id="kwin-rule-editor"><title>KWin Rule Editor</title> 
@@ -1012,7 +1012,7 @@ and <guibutton>Move Down</guibutton> buttons effects on how they are applied.</p
 <title>Credits and License</title>
       <para>
 Documentation Copyright see the UserBase
-      <ulink url="https://userbase.kde.org/index.php?title=KWin Rules&amp;action=history">KWin Rules page history</ulink></para>
+      <ulink url="https://userbase.kde.org/index.php?title=KWin_Rules&amp;action=history">KWin Rules page history</ulink></para>
       <!-- TRANS:CREDIT_FOR_TRANSLATORS -->
 &underFDL;
 </chapter>

@@ -22,29 +22,36 @@ class SurfaceItem;
 class DrmFramebuffer;
 class GLTexture;
 class DrmPipeline;
+class DrmOutput;
 
 class DrmOutputLayer : public OutputLayer
 {
 public:
-    explicit DrmOutputLayer(Output *output);
+    explicit DrmOutputLayer(Output *output, OutputLayerType type);
+    explicit DrmOutputLayer(Output *output, OutputLayerType type, int zpos, int minZpos, int maxZpos);
     virtual ~DrmOutputLayer();
-
-    virtual std::shared_ptr<GLTexture> texture() const;
-    virtual void releaseBuffers() = 0;
 };
 
 class DrmPipelineLayer : public DrmOutputLayer
 {
 public:
-    explicit DrmPipelineLayer(DrmPipeline *pipeline, DrmPlane::TypeIndex type);
+    explicit DrmPipelineLayer(DrmPlane *plane);
+    explicit DrmPipelineLayer(DrmPlane::TypeIndex type);
 
-    virtual bool checkTestBuffer() = 0;
+    DrmDevice *scanoutDevice() const override;
+    QHash<uint32_t, QList<uint64_t>> supportedDrmFormats() const override;
+    QList<QSize> recommendedSizes() const override;
+    QHash<uint32_t, QList<uint64_t>> supportedAsyncDrmFormats() const override;
+
     virtual std::shared_ptr<DrmFramebuffer> currentBuffer() const = 0;
-    virtual const ColorPipeline &colorPipeline() const = 0;
-    virtual ColorDescription colorDescription() const = 0;
+
+    DrmPlane *plane() const;
 
 protected:
-    DrmPipeline *const m_pipeline;
-    const DrmPlane::TypeIndex m_type;
+    DrmPipeline *pipeline() const;
+    DrmGpu *gpu() const;
+    DrmOutput *drmOutput() const;
+
+    DrmPlane *m_plane = nullptr;
 };
 }

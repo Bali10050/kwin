@@ -238,7 +238,7 @@ bool Workspace::workspaceEvent(xcb_generic_event_t *e)
                 // => catch the typical pattern (though we don't want the focus on the root anyway) #348935
                 const bool lostFocusPointerToRoot = currentInput->focus == kwinApp()->x11RootWindow() && event->detail == XCB_NOTIFY_DETAIL_INFERIOR;
                 if (currentInput->focus == XCB_WINDOW_NONE || currentInput->focus == XCB_INPUT_FOCUS_POINTER_ROOT || lostFocusPointerToRoot) {
-                    // kWarning( 1212 ) << "X focus set to None/PointerRoot, reseting focus" ;
+                    // kWarning( 1212 ) << "X focus set to None/PointerRoot, resetting focus" ;
                     Window *window = mostRecentlyActivatedWindow();
                     if (window != nullptr) {
                         requestFocus(window, true);
@@ -419,9 +419,6 @@ void X11Window::mapRequestEvent(xcb_map_request_event_t *e)
     if (isMinimized()) {
         setMinimized(false);
     }
-    if (isShade()) {
-        setShade(ShadeNone);
-    }
     if (!isOnCurrentDesktop()) {
         if (allowWindowActivation()) {
             workspace()->activateWindow(this);
@@ -479,10 +476,10 @@ void X11Window::configureNotifyEvent(xcb_configure_notify_event_t *e)
         m_frameGeometry = newgeom;
         m_bufferGeometry = newgeom;
         checkOutput();
+        updateShapeRegion();
         Q_EMIT bufferGeometryChanged(old);
         Q_EMIT clientGeometryChanged(old);
         Q_EMIT frameGeometryChanged(old);
-        Q_EMIT shapeChanged();
     }
 }
 
@@ -582,7 +579,7 @@ void X11Window::focusInEvent(xcb_focus_in_event_t *e)
     if (e->detail == XCB_NOTIFY_DETAIL_POINTER) {
         return; // we don't care
     }
-    if (isShade() || !isShown() || !isOnCurrentDesktop()) { // we unmapped it, but it got focus meanwhile ->
+    if (!isShown() || !isOnCurrentDesktop()) { // we unmapped it, but it got focus meanwhile ->
         return; // activateNextWindow() already transferred focus elsewhere
     }
     workspace()->forEachClient([](X11Window *window) {
@@ -592,13 +589,13 @@ void X11Window::focusInEvent(xcb_focus_in_event_t *e)
     bool activate = allowWindowActivation(-1U, true);
     workspace()->gotFocusIn(this); // remove from should_get_focus list
     if (activate) {
-        setActive(true);
+        workspace()->setActiveWindow(this);
     } else {
         if (workspace()->restoreFocus()) {
             demandAttention();
         } else {
             qCWarning(KWIN_CORE, "Failed to restore focus. Activating 0x%x", window());
-            setActive(true);
+            workspace()->setActiveWindow(this);
         }
     }
 }
@@ -608,16 +605,13 @@ void X11Window::focusOutEvent(xcb_focus_out_event_t *e)
     if (e->mode == XCB_NOTIFY_MODE_GRAB || e->mode == XCB_NOTIFY_MODE_UNGRAB) {
         return; // we don't care
     }
-    if (isShade()) {
-        return; // here neither
-    }
     if (e->detail != XCB_NOTIFY_DETAIL_NONLINEAR
         && e->detail != XCB_NOTIFY_DETAIL_NONLINEAR_VIRTUAL) {
         // SELI check all this
         return; // hack for motif apps like netscape
     }
 
-    // When a window loses focus, FocusOut events are usually immediatelly
+    // When a window loses focus, FocusOut events are usually immediately
     // followed by FocusIn events for another window that gains the focus
     // (unless the focus goes to another screen, or to the nofocus widget).
     // Without this check, the former focused window would have to be
@@ -637,7 +631,9 @@ void X11Window::focusOutEvent(xcb_focus_out_event_t *e)
         m_focusOutTimer->setSingleShot(true);
         m_focusOutTimer->setInterval(0);
         connect(m_focusOutTimer, &QTimer::timeout, this, [this]() {
-            setActive(false);
+            if (workspace()->activeWindow() == this) {
+                workspace()->setActiveWindow(nullptr);
+            }
         });
     }
     m_focusOutTimer->start();
@@ -652,8 +648,7 @@ void X11Window::shapeNotifyEvent(xcb_shape_notify_event_t *e)
     switch (e->shape_kind) {
     case XCB_SHAPE_SK_BOUNDING:
     case XCB_SHAPE_SK_CLIP:
-        detectShape();
-        Q_EMIT shapeChanged();
+        updateShapeRegion();
         break;
     case XCB_SHAPE_SK_INPUT:
         break;
@@ -694,7 +689,7 @@ void X11Window::NETMoveResize(qreal x_root, qreal y_root, NET::Direction directi
                 Gravity::Bottom,
                 Gravity::BottomLeft,
                 Gravity::Left};
-            if (!isResizable() || isShade()) {
+            if (!isResizable()) {
                 return;
             }
             if (isInteractiveMoveResize()) {

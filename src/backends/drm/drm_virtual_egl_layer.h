@@ -36,20 +36,16 @@ public:
 
     std::optional<OutputLayerBeginFrameInfo> doBeginFrame() override;
     bool doEndFrame(const QRegion &renderedRegion, const QRegion &damagedRegion, OutputFrame *frame) override;
-
-    std::shared_ptr<GLTexture> texture() const override;
     void releaseBuffers() override;
     DrmDevice *scanoutDevice() const override;
     QHash<uint32_t, QList<uint64_t>> supportedDrmFormats() const override;
-    const ColorDescription &colorDescription() const;
 
 private:
-    bool doImportScanoutBuffer(GraphicsBuffer *buffer, const ColorDescription &color, RenderingIntent intent, const std::shared_ptr<OutputFrame> &frame) override;
+    bool importScanoutBuffer(GraphicsBuffer *buffer, const std::shared_ptr<OutputFrame> &frame) override;
     std::shared_ptr<EglSwapchain> createGbmSwapchain() const;
     bool doesGbmSwapchainFit(EglSwapchain *swapchain) const;
 
     GraphicsBufferRef m_scanoutBuffer;
-    ColorDescription m_scanoutColor = ColorDescription::sRGB;
     DamageJournal m_damageJournal;
     DamageJournal m_oldDamageJournal;
     std::shared_ptr<EglSwapchain> m_gbmSwapchain;

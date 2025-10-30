@@ -21,7 +21,7 @@ namespace KWin
 {
 
 VirtualQPainterLayer::VirtualQPainterLayer(Output *output, VirtualQPainterBackend *backend)
-    : OutputLayer(output)
+    : OutputLayer(output, OutputLayerType::Primary)
     , m_backend(backend)
 {
 }
@@ -71,11 +71,17 @@ QHash<uint32_t, QList<uint64_t>> VirtualQPainterLayer::supportedDrmFormats() con
     return {{DRM_FORMAT_ARGB8888, {DRM_FORMAT_MOD_LINEAR}}};
 }
 
+void VirtualQPainterLayer::releaseBuffers()
+{
+    m_current.reset();
+    m_swapchain.reset();
+}
+
 VirtualQPainterBackend::VirtualQPainterBackend(VirtualBackend *backend)
-    : m_allocator(std::make_unique<ShmGraphicsBufferAllocator>())
+    : m_backend(backend)
+    , m_allocator(std::make_unique<ShmGraphicsBufferAllocator>())
 {
     connect(backend, &VirtualBackend::outputAdded, this, &VirtualQPainterBackend::addOutput);
-    connect(backend, &VirtualBackend::outputRemoved, this, &VirtualQPainterBackend::removeOutput);
 
     const auto outputs = backend->outputs();
     for (Output *output : outputs) {
@@ -83,16 +89,17 @@ VirtualQPainterBackend::VirtualQPainterBackend(VirtualBackend *backend)
     }
 }
 
-VirtualQPainterBackend::~VirtualQPainterBackend() = default;
+VirtualQPainterBackend::~VirtualQPainterBackend()
+{
+    const auto outputs = m_backend->outputs();
+    for (Output *output : outputs) {
+        static_cast<VirtualOutput *>(output)->setOutputLayer(nullptr);
+    }
+}
 
 void VirtualQPainterBackend::addOutput(Output *output)
 {
-    m_outputs[output] = std::make_unique<VirtualQPainterLayer>(output, this);
-}
-
-void VirtualQPainterBackend::removeOutput(Output *output)
-{
-    m_outputs.erase(output);
+    static_cast<VirtualOutput *>(output)->setOutputLayer(std::make_unique<VirtualQPainterLayer>(output, this));
 }
 
 GraphicsBufferAllocator *VirtualQPainterBackend::graphicsBufferAllocator() const
@@ -100,9 +107,9 @@ GraphicsBufferAllocator *VirtualQPainterBackend::graphicsBufferAllocator() const
     return m_allocator.get();
 }
 
-VirtualQPainterLayer *VirtualQPainterBackend::primaryLayer(Output *output)
+QList<OutputLayer *> VirtualQPainterBackend::compatibleOutputLayers(Output *output)
 {
-    return m_outputs[output].get();
+    return {static_cast<VirtualOutput *>(output)->outputLayer()};
 }
 }
 

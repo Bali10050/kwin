@@ -15,7 +15,7 @@
 
 namespace KWin
 {
-static const quint32 s_version = 2;
+static const quint32 s_version = 3;
 
 class PlasmaVirtualDesktopInterfacePrivate : public QtWaylandServer::org_kde_plasma_virtual_desktop
 {
@@ -26,6 +26,7 @@ public:
     PlasmaVirtualDesktopInterface *q;
     QString id;
     QString name;
+    uint position = 0;
     bool active = false;
 
 protected:
@@ -38,6 +39,7 @@ class PlasmaVirtualDesktopManagementInterfacePrivate : public QtWaylandServer::o
 public:
     PlasmaVirtualDesktopManagementInterfacePrivate(PlasmaVirtualDesktopManagementInterface *_q, Display *display);
 
+    QTimer doneTimer;
     QList<PlasmaVirtualDesktopInterface *> desktops;
     quint32 rows = 0;
     quint32 columns = 0;
@@ -116,6 +118,14 @@ PlasmaVirtualDesktopManagementInterface::PlasmaVirtualDesktopManagementInterface
     : QObject(parent)
     , d(new PlasmaVirtualDesktopManagementInterfacePrivate(this, display))
 {
+    d->doneTimer.setSingleShot(true);
+    d->doneTimer.setInterval(0);
+    connect(&d->doneTimer, &QTimer::timeout, this, [this]() {
+        const auto clientResources = d->resourceMap();
+        for (auto resource : clientResources) {
+            d->send_done(resource->handle);
+        }
+    });
 }
 
 PlasmaVirtualDesktopManagementInterface::~PlasmaVirtualDesktopManagementInterface()
@@ -206,12 +216,9 @@ QList<PlasmaVirtualDesktopInterface *> PlasmaVirtualDesktopManagementInterface::
     return d->desktops;
 }
 
-void PlasmaVirtualDesktopManagementInterface::sendDone()
+void PlasmaVirtualDesktopManagementInterface::scheduleDone()
 {
-    const auto clientResources = d->resourceMap();
-    for (auto resource : clientResources) {
-        d->send_done(resource->handle);
-    }
+    d->doneTimer.start();
 }
 
 //// PlasmaVirtualDesktopInterface
@@ -247,6 +254,12 @@ void PlasmaVirtualDesktopInterfacePrivate::org_kde_plasma_virtual_desktop_bind_r
     if (active) {
         send_activated(resource->handle);
     }
+
+    if (resource->version() >= ORG_KDE_PLASMA_VIRTUAL_DESKTOP_POSITION_SINCE_VERSION) {
+        send_position(resource->handle, position);
+    }
+
+    send_done(resource->handle);
 }
 
 PlasmaVirtualDesktopInterface::PlasmaVirtualDesktopInterface()
@@ -305,6 +318,27 @@ void PlasmaVirtualDesktopInterface::setActive(bool active)
 bool PlasmaVirtualDesktopInterface::isActive() const
 {
     return d->active;
+}
+
+void PlasmaVirtualDesktopInterface::setPosition(uint position)
+{
+    if (d->position == position) {
+        return;
+    }
+
+    d->position = position;
+
+    const auto clientResources = d->resourceMap();
+    for (auto resource : clientResources) {
+        if (resource->version() >= ORG_KDE_PLASMA_VIRTUAL_DESKTOP_POSITION_SINCE_VERSION) {
+            d->send_position(resource->handle, position);
+        }
+    }
+}
+
+uint PlasmaVirtualDesktopInterface::position() const
+{
+    return d->position;
 }
 
 void PlasmaVirtualDesktopInterface::sendDone()

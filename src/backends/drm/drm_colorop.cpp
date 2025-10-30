@@ -9,15 +9,19 @@
 #include "drm_colorop.h"
 #include "drm_blob.h"
 #include "drm_commit.h"
+#include "drm_gpu.h"
 #include "drm_object.h"
+#include "utils/envvar.h"
 
 #include <ranges>
 
 namespace KWin
 {
 
-DrmAbstractColorOp::DrmAbstractColorOp(DrmAbstractColorOp *next)
+DrmAbstractColorOp::DrmAbstractColorOp(DrmAbstractColorOp *next, Features features, const QString &name)
     : m_next(next)
+    , m_features(features)
+    , m_name(name)
 {
 }
 
@@ -30,10 +34,37 @@ DrmAbstractColorOp *DrmAbstractColorOp::next() const
     return m_next;
 }
 
+static const auto s_disableAmdgpuWorkaround = environmentVariableBoolValue("KWIN_DRM_DISABLE_AMD_GAMMA_WORKAROUND");
+
+bool DrmAbstractColorOp::canBypass() const
+{
+    return m_features & Feature::Bypass;
+}
+
+bool DrmAbstractColorOp::supportsMultipleOps() const
+{
+    return m_features & Feature::MultipleOps;
+}
+
+QString DrmAbstractColorOp::name() const
+{
+    return m_name;
+}
+
 bool DrmAbstractColorOp::matchPipeline(DrmAtomicCommit *commit, const ColorPipeline &pipeline)
 {
     if (m_cachedPipeline && *m_cachedPipeline == pipeline) {
         commit->merge(m_cache.get());
+        return true;
+    }
+    if (pipeline.isIdentity() && s_disableAmdgpuWorkaround.value_or(!commit->gpu()->isAmdgpu())) {
+        // Applying this config is very simple and cheap, so do it directly
+        // and avoid invalidating the cache
+        DrmAbstractColorOp *currentOp = this;
+        while (currentOp) {
+            currentOp->bypass(commit);
+            currentOp = currentOp->next();
+        }
         return true;
     }
 
@@ -117,7 +148,7 @@ bool DrmAbstractColorOp::matchPipeline(DrmAtomicCommit *commit, const ColorPipel
 }
 
 DrmLutColorOp::DrmLutColorOp(DrmAbstractColorOp *next, DrmProperty *prop, uint32_t maxSize)
-    : DrmAbstractColorOp(next)
+    : DrmAbstractColorOp(next, Features{Feature::MultipleOps} | Feature::Bypass, QStringLiteral("1D LUT"))
     , m_prop(prop)
     , m_maxSize(maxSize)
     , m_components(m_maxSize)
@@ -135,7 +166,7 @@ bool DrmLutColorOp::canBeUsedFor(const ColorOp &op, bool scaling)
         || std::holds_alternative<ColorTonemapper>(op.operation) || std::holds_alternative<std::shared_ptr<ColorTransformation>>(op.operation)) {
         // the required resolution depends heavily on the function and on the input and output ranges / multipliers
         // but this is good enough for now
-        return m_maxSize >= 1024;
+        return m_maxSize >= 256;
     } else if (std::holds_alternative<ColorMultiplier>(op.operation)) {
         return true;
     }
@@ -179,7 +210,7 @@ void DrmLutColorOp::bypass(DrmAtomicCommit *commit)
 }
 
 LegacyMatrixColorOp::LegacyMatrixColorOp(DrmAbstractColorOp *next, DrmProperty *prop)
-    : DrmAbstractColorOp(next)
+    : DrmAbstractColorOp(next, Features{Feature::MultipleOps} | Feature::Bypass, QStringLiteral("legacy matrix"))
     , m_prop(prop)
 {
 }

@@ -15,6 +15,13 @@
 namespace KWin
 {
 
+enum class ColorspaceType {
+    LinearRGB = 0,
+    NonLinearRGB,
+    ICtCp,
+    AnyNonRGB,
+};
+
 class IccProfile;
 
 class KWIN_EXPORT ValueRange
@@ -76,22 +83,25 @@ public:
     double map(double pqEncodedLuminance) const;
     bool operator==(const ColorTonemapper &) const = default;
 
-    double m_inputReferenceLuminance;
-    double m_maxInputLuminance;
-    double m_maxOutputLuminance;
+    double m_referenceLuminance;
     double m_inputRange;
-    double m_referenceDimming;
-    double m_outputReferenceLuminance;
+    double m_outputRange;
+    double m_v;
 };
 
 class KWIN_EXPORT ColorOp
 {
 public:
+    using Operation = std::variant<ColorTransferFunction, InverseColorTransferFunction, ColorMatrix, ColorMultiplier, ColorTonemapper, std::shared_ptr<ColorTransformation>, std::shared_ptr<ColorLUT3D>>;
     ValueRange input;
-    std::variant<ColorTransferFunction, InverseColorTransferFunction, ColorMatrix, ColorMultiplier, ColorTonemapper, std::shared_ptr<ColorTransformation>, std::shared_ptr<ColorLUT3D>> operation;
+    ColorspaceType inputSpace = ColorspaceType::AnyNonRGB;
+    Operation operation;
     ValueRange output;
+    ColorspaceType outputSpace = ColorspaceType::AnyNonRGB;
 
     bool operator==(const ColorOp &) const = default;
+    QVector3D apply(const QVector3D input) const;
+    static QVector3D applyOperation(const ColorOp::Operation &operation, const QVector3D &input);
 };
 
 class KWIN_EXPORT ColorPipeline
@@ -105,32 +115,36 @@ public:
     static constexpr float s_maxResolution = 0.00001;
 
     explicit ColorPipeline();
-    explicit ColorPipeline(const ValueRange &inputRange);
+    explicit ColorPipeline(const ValueRange &inputRange, ColorspaceType inputType);
 
-    static ColorPipeline create(const ColorDescription &from, const ColorDescription &to, RenderingIntent intent);
+    static ColorPipeline create(const std::shared_ptr<ColorDescription> &from, const std::shared_ptr<ColorDescription> &to, RenderingIntent intent);
 
     ColorPipeline merged(const ColorPipeline &onTop) const;
 
     bool isIdentity() const;
-    bool operator==(const ColorPipeline &other) const = default;
+    bool operator==(const ColorPipeline &other) const;
     const ValueRange &currentOutputRange() const;
+    ColorspaceType currentOutputSpace() const;
     QVector3D evaluate(const QVector3D &input) const;
 
     void addMultiplier(double factor);
     void addMultiplier(const QVector3D &factors);
-    void addTransferFunction(TransferFunction tf);
-    void addInverseTransferFunction(TransferFunction tf);
-    void addMatrix(const QMatrix4x4 &mat, const ValueRange &output);
+    void addTransferFunction(TransferFunction tf, ColorspaceType outputType);
+    void addInverseTransferFunction(TransferFunction tf, ColorspaceType outputType);
+    void addMatrix(const QMatrix4x4 &mat, const ValueRange &output, ColorspaceType outputType);
     void addTonemapper(const Colorimetry &containerColorimetry, double referenceLuminance, double maxInputLuminance, double maxOutputLuminance);
     void add(const ColorOp &op);
     void add(const ColorPipeline &pipeline);
-    void add1DLUT(const std::shared_ptr<ColorTransformation> &transform);
+    void add1DLUT(const std::shared_ptr<ColorTransformation> &transform, ColorspaceType outputType);
 
     ValueRange inputRange;
+    ColorspaceType inputSpace;
     std::vector<ColorOp> ops;
 };
 
 KWIN_EXPORT bool isFuzzyIdentity(const QMatrix4x4 &mat);
 }
 
+KWIN_EXPORT QDebug operator<<(QDebug debug, const KWin::ColorOp &op);
 KWIN_EXPORT QDebug operator<<(QDebug debug, const KWin::ColorPipeline &pipeline);
+KWIN_EXPORT QDebug operator<<(QDebug debug, const KWin::ValueRange &value);

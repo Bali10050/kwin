@@ -52,6 +52,7 @@ namespace TabBox
 class TabBox;
 }
 
+class Gravity;
 class Window;
 class Output;
 class Compositor;
@@ -228,7 +229,7 @@ public:
     RootTile *rootTile(Output *output, VirtualDesktop *desktop) const;
 
 public:
-    QPoint cascadeOffset(const QRectF &area) const;
+    QPointF cascadeOffset(const QRectF &area) const;
 
     //-------------------------------------------------
     // Unsorted
@@ -322,6 +323,7 @@ public:
     Output *findOutput(const QString &name) const;
     void switchToOutput(Output *output);
 
+    QString outputLayoutId() const;
     QList<Output *> outputs() const;
     Output *outputAt(const QPointF &pos) const;
 
@@ -350,6 +352,9 @@ public:
     void addDeleted(Window *);
 
     void focusToNull(); // SELI TODO: Public?
+#if KWIN_BUILD_X11
+    xcb_window_t nullFocusWindow() const;
+#endif
 
     void windowShortcutUpdated(Window *window);
     bool shortcutAvailable(const QKeySequence &cut, Window *ignore = nullptr) const;
@@ -432,6 +437,9 @@ public:
     OutputConfigurationError applyOutputConfiguration(OutputConfiguration &config, const std::optional<QList<Output *>> &outputOrder = std::nullopt);
     void updateXwaylandScale();
 
+    void setActivationToken(const QString &token, uint32_t serial, const QString &appId);
+    bool mayActivate(Window *window, const QString &token) const;
+
 public Q_SLOTS:
     void performWindowOperation(KWin::Window *window, Options::WindowOperation op);
     // Keybindings
@@ -460,7 +468,6 @@ public Q_SLOTS:
     void slotWindowMaximizeVertical();
     void slotWindowMaximizeHorizontal();
     void slotWindowMinimize();
-    void slotWindowShade();
     void slotWindowRaise();
     void slotWindowLower();
     void slotWindowRaiseOrLower();
@@ -561,9 +568,9 @@ private:
     void init();
     void initShortcuts();
     template<typename Slot>
-    void initShortcut(const QString &actionName, const QString &description, const QKeySequence &shortcut, Slot slot);
+    void initShortcut(const QString &actionName, const QString &description, const QKeySequence &shortcut, Slot slot, bool autoRepeat);
     template<typename T, typename Slot>
-    void initShortcut(const QString &actionName, const QString &description, const QKeySequence &shortcut, T *receiver, Slot slot);
+    void initShortcut(const QString &actionName, const QString &description, const QKeySequence &shortcut, T *receiver, Slot slot, bool autoRepeat);
     void setupWindowShortcut(Window *window);
     bool switchWindow(Window *window, Direction direction, QPoint curPos, VirtualDesktop *desktop);
 
@@ -599,10 +606,10 @@ private:
 
     void closeActivePopup();
     void updateWindowVisibilityOnDesktopChange(VirtualDesktop *newDesktop);
+    void updateWindowVisibilityAndActivateOnDesktopChange(VirtualDesktop *newDesktop);
     void activateWindowOnDesktop(VirtualDesktop *desktop);
     Window *findWindowToActivateOnDesktop(VirtualDesktop *desktop);
     void removeWindow(Window *window);
-    QString getPlacementTrackerHash();
 
     void updateOutputConfiguration();
     void updateOutputs(const std::optional<QList<Output *>> &outputOrder = std::nullopt);
@@ -724,6 +731,10 @@ private:
     std::unique_ptr<OrientationSensor> m_orientationSensor;
     std::unique_ptr<DpmsInputEventFilter> m_dpmsFilter;
     KConfigWatcher::Ptr m_kdeglobalsWatcher;
+
+    QString m_activationToken;
+    QString m_activationTokenAppId;
+    uint32_t m_activationTokenSerial = 0;
 
 private:
     friend bool performTransiencyCheck();

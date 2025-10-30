@@ -47,7 +47,7 @@ private Q_SLOTS:
     void handleChildSubSurfaceRemoved(SubSurfaceInterface *child);
     void handleChildSubSurfacesChanged();
     void handleSubSurfacePositionChanged();
-    void handleSubSurfaceMappedChanged();
+    void handleSurfaceMappedChanged();
     void handleColorDescriptionChanged();
     void handlePresentationModeHintChanged();
     void handleReleasePointChanged();
@@ -85,7 +85,10 @@ public:
     QList<QRectF> shape() const override;
 
 private:
+    void handleShapeChange();
+
     X11Window *m_window;
+    QRegion m_previousBufferShape;
 };
 #endif
 

@@ -15,6 +15,7 @@
 #include "input.h"
 #include "input_event.h"
 #include "kscreenintegration.h"
+#include "outputconfiglogging.h"
 #include "workspace.h"
 
 #include <QFile>
@@ -116,7 +117,7 @@ void OutputConfigurationStore::applyMirroring(OutputConfiguration &config, const
         }
         Output *const source = *sourceIt;
         if (source == output) {
-            qCWarning(KWIN_CORE, "Output %s is trying to mirror itself, that shouldn't happen!", qPrintable(output->name()));
+            qCWarning(KWIN_OUTPUT_CONFIG, "Output %s is trying to mirror itself, that shouldn't happen!", qPrintable(output->name()));
             continue;
         }
         const auto sourceChange = config.changeSet(source);
@@ -454,11 +455,14 @@ std::pair<OutputConfiguration, QList<Output *>> OutputConfigurationStore::setupT
         const auto modeIt = std::find_if(modes.begin(), modes.end(), [&state](const auto &mode) {
             return state.mode
                 && mode->size() == state.mode->size
-                && mode->refreshRate() == state.mode->refreshRate;
+                && mode->refreshRate() == state.mode->refreshRate
+                && !(mode->flags() & OutputMode::Flag::Removed);
         });
         std::optional<std::shared_ptr<OutputMode>> mode = modeIt == modes.end() ? std::nullopt : std::optional(*modeIt);
-        if (!mode.has_value() || !*mode || ((*mode)->flags() & OutputMode::Flag::Removed)) {
+        if (!mode.has_value() || !*mode) {
             mode = chooseMode(output);
+            qCDebug(KWIN_OUTPUT_CONFIG, "Chose new mode for output %s: %dx%d@%u",
+                    qPrintable(state.edidIdentifier), (*mode)->size().width(), (*mode)->size().height(), (*mode)->refreshRate());
         }
         *ret.changeSet(output) = OutputChangeSet{
             .mode = mode,
@@ -570,6 +574,7 @@ std::optional<std::pair<OutputConfiguration, QList<Output *>>> OutputConfigurati
 
 std::pair<OutputConfiguration, QList<Output *>> OutputConfigurationStore::generateConfig(const QList<Output *> &outputs, bool isLidClosed)
 {
+    qCDebug(KWIN_OUTPUT_CONFIG, "Generating new config for %lld outputs", outputs.size());
     if (isLidClosed) {
         if (const auto closedConfig = generateLidClosedConfig(outputs)) {
             return *closedConfig;
@@ -620,7 +625,7 @@ std::pair<OutputConfiguration, QList<Output *>> OutputConfigurationStore::genera
             .colorPowerTradeoff = existingData.colorPowerTradeoff.value_or(Output::ColorPowerTradeoff::PreferEfficiency),
             .uuid = existingData.uuid,
             .detectedDdcCi = existingData.detectedDdcCi.value_or(false),
-            .allowDdcCi = existingData.allowDdcCi.value_or(true),
+            .allowDdcCi = existingData.allowDdcCi.value_or(!output->isDdcCiKnownBroken()),
             .maxBitsPerColor = existingData.maxBitsPerColor,
             .edrPolicy = existingData.edrPolicy.value_or(Output::EdrPolicy::Always),
         };
@@ -755,9 +760,16 @@ double OutputConfigurationStore::chooseScale(Output *output, OutputMode *mode) c
     const double maxScaleY = std::clamp(mode->size().height() / minSize, 1.0, 3.0);
     const double scaleY = std::clamp(dpiY / targetDpi, 1.0, maxScaleY);
 
-    const double scale = std::min(scaleX, scaleY);
+    double scale = std::min(scaleX, scaleY);
     const double steps = 5;
-    return std::round(100.0 * scale / steps) * steps / 100.0;
+    scale = std::round(100.0 * scale / steps) * steps / 100.0;
+
+    // Low-but-not-1 scale factors look like a blurry mess; 1x is better here
+    if (scale < 1.20) {
+        scale = 1.0;
+    }
+
+    return scale;
 }
 
 void OutputConfigurationStore::registerOutputs(const QList<Output *> &outputs)
@@ -791,13 +803,13 @@ void OutputConfigurationStore::load()
 
     QFile f(jsonPath);
     if (!f.open(QIODevice::ReadOnly)) {
-        qCWarning(KWIN_CORE) << "Could not open file" << jsonPath;
+        qCWarning(KWIN_OUTPUT_CONFIG) << "Could not open file" << jsonPath;
         return;
     }
     QJsonParseError error;
     const auto doc = QJsonDocument::fromJson(f.readAll(), &error);
     if (error.error != QJsonParseError::NoError) {
-        qCWarning(KWIN_CORE) << "Failed to parse" << jsonPath << error.errorString();
+        qCWarning(KWIN_OUTPUT_CONFIG) << "Failed to parse" << jsonPath << error.errorString();
         return;
     }
     const auto array = doc.array();
@@ -849,7 +861,7 @@ void OutputConfigurationStore::load()
             // without an identifier the settings are useless
             // we still have to push something into the list so that the indices stay correct
             outputDatas.push_back(std::nullopt);
-            qCWarning(KWIN_CORE, "Output in config is missing identifiers");
+            qCWarning(KWIN_OUTPUT_CONFIG, "Output in config is missing identifiers");
             continue;
         }
         const bool hasDuplicate = std::any_of(outputDatas.begin(), outputDatas.end(), [&state](const auto &data) {
@@ -860,7 +872,7 @@ void OutputConfigurationStore::load()
                 && data->connectorName == state.connectorName;
         });
         if (hasDuplicate) {
-            qCWarning(KWIN_CORE) << "Duplicate output found in config for edidIdentifier:" << state.edidIdentifier << "; connectorName:" << state.connectorName << "; mstPath:" << state.mstPath;
+            qCWarning(KWIN_OUTPUT_CONFIG) << "Duplicate output found in config for edidIdentifier:" << state.edidIdentifier << "; connectorName:" << state.connectorName << "; mstPath:" << state.mstPath;
             outputDatas.push_back(std::nullopt);
             continue;
         }
@@ -874,6 +886,7 @@ void OutputConfigurationStore::load()
                     .size = QSize(width, height),
                     .refreshRate = uint32_t(refreshRate),
                 };
+                qCDebug(KWIN_OUTPUT_CONFIG, "Read mode %dx%d@%u for output %s", width, height, refreshRate, qPrintable(state.edidIdentifier));
             }
         }
         if (const auto it = data.find("scale"); it != data.end()) {
@@ -952,9 +965,17 @@ void OutputConfigurationStore::load()
         }
         if (const auto it = data.find("maxPeakBrightnessOverride"); it != data.end() && it->isDouble()) {
             state.maxPeakBrightnessOverride = it->toDouble();
+            if (*state.maxPeakBrightnessOverride < 50) {
+                // clearly nonsense
+                state.maxPeakBrightnessOverride.reset();
+            }
         }
         if (const auto it = data.find("maxAverageBrightnessOverride"); it != data.end() && it->isDouble()) {
             state.maxAverageBrightnessOverride = it->toDouble();
+            if (*state.maxAverageBrightnessOverride < 50) {
+                // clearly nonsense
+                state.maxAverageBrightnessOverride.reset();
+            }
         }
         if (const auto it = data.find("minBrightnessOverride"); it != data.end() && it->isDouble()) {
             state.minBrightnessOverride = it->toDouble();
@@ -1335,7 +1356,7 @@ void OutputConfigurationStore::save()
     const QString path = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) + "/kwinoutputconfig.json";
     QFile f(path);
     if (!f.open(QIODevice::WriteOnly)) {
-        qCWarning(KWIN_CORE, "Couldn't open output config file %s", qPrintable(path));
+        qCWarning(KWIN_OUTPUT_CONFIG, "Couldn't open output config file %s", qPrintable(path));
         return;
     }
     document.setArray(array);

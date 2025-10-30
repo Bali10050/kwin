@@ -78,7 +78,7 @@ const ColorPipeline *IccProfile::BToATag(RenderingIntent intent) const
         // these two are different from relative colorimetric
         // but that has to be handled before the tag is applied
     case RenderingIntent::RelativeColorimetricWithBPC:
-    case RenderingIntent::AbsoluteColorimetric:
+    case RenderingIntent::AbsoluteColorimetricNoAdaptation:
         return m_bToA1Tag ? &*m_bToA1Tag : nullptr;
     }
     Q_UNREACHABLE();
@@ -365,7 +365,7 @@ std::expected<std::unique_ptr<IccProfile>, QString> IccProfile::load(const QStri
         // inverse transfer function by doing a grayscale transform on the BToA tag instead
         const QMatrix4x4 toXYZD50 = Colorimetry::chromaticAdaptationMatrix(white, D50) * Colorimetry(red, green, blue, white).toXYZ();
         ColorPipeline pipeline;
-        pipeline.addMatrix(toXYZD50, ValueRange{});
+        pipeline.addMatrix(toXYZD50, ValueRange{}, ColorspaceType::AnyNonRGB);
         pipeline.add(bToA1 ? *bToA1 : *bToA0);
         std::array<float, trcSize> red;
         std::array<float, trcSize> green;

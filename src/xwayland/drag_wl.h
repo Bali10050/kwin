@@ -27,7 +27,6 @@ class X11Window;
 namespace Xwl
 {
 class X11Source;
-enum class DragEventReply;
 class Xvisit;
 class Dnd;
 
@@ -38,7 +37,7 @@ class WlToXDrag : public Drag
 
 public:
     explicit WlToXDrag(Dnd *dnd);
-    DragEventReply moveFilter(Window *target) override;
+    bool moveFilter(Window *target, const QPointF &position) override;
     bool handleClientMessage(xcb_client_message_event_t *event) override;
 
 private:
@@ -61,6 +60,7 @@ public:
     bool handleFinished(xcb_client_message_event_t *event);
 
     void sendPosition(const QPointF &globalPos);
+    void enter(const QPointF &globalPos);
     void leave();
 
     bool isFinished() const
@@ -82,7 +82,6 @@ private:
     void sendLeave();
 
     void receiveOffer();
-    void enter();
 
     void retrieveSupportedActions();
     void determineProposedAction();
@@ -90,14 +89,11 @@ private:
     void setProposedAction();
 
     void doFinish();
-    void stopConnections();
 
     Dnd *const m_dnd;
     X11Window *m_target;
     QPointer<AbstractDataSource> m_dataSource;
     uint32_t m_version = 0;
-
-    QMetaObject::Connection m_motionConnection;
 
     struct
     {

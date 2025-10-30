@@ -22,12 +22,14 @@ namespace KWin
 {
 class AbstractDataSource;
 class DataDeviceInterface;
+class DataOfferInterface;
 class DataSourceInterface;
 class DataControlDeviceV1Interface;
 class TextInputV1Interface;
 class TextInputV2Interface;
 class TextInputV3Interface;
 class PrimarySelectionDeviceV1Interface;
+class PrimarySelectionOfferV1Interface;
 class PrimarySelectionSourceV1Interface;
 class DragAndDropIcon;
 
@@ -40,12 +42,16 @@ public:
 
     void sendCapabilities();
     QList<DataDeviceInterface *> dataDevicesForSurface(SurfaceInterface *surface) const;
+    QList<PrimarySelectionDeviceV1Interface *> primarySelectionDevicesForSurface(SurfaceInterface *surface) const;
     void registerPrimarySelectionDevice(PrimarySelectionDeviceV1Interface *primarySelectionDevice);
     void registerDataDevice(DataDeviceInterface *dataDevice);
     void registerDataControlDevice(DataControlDeviceV1Interface *dataDevice);
-    void endDrag();
-    void cancelDrag();
     bool dragInhibitsPointer(SurfaceInterface *surface) const;
+
+    void offerSelection(DataDeviceInterface *device);
+    void offerSelection(DataControlDeviceV1Interface *device);
+    void offerPrimarySelection(PrimarySelectionDeviceV1Interface *device);
+    void offerPrimarySelection(DataControlDeviceV1Interface *device);
 
     SeatInterface *q;
     QPointer<Display> display;
@@ -55,6 +61,7 @@ public:
     std::unique_ptr<KeyboardInterface> keyboard;
     std::unique_ptr<PointerInterface> pointer;
     std::unique_ptr<TouchInterface> touch;
+    std::map<qint32, std::unique_ptr<TouchPoint>> touchPoints;
     QList<DataDeviceInterface *> dataDevices;
     QList<PrimarySelectionDeviceV1Interface *> primarySelectionDevices;
     QList<DataControlDeviceV1Interface *> dataControlDevices;
@@ -102,41 +109,21 @@ public:
     {
         struct Focus
         {
-            SurfaceInterface *surface = nullptr;
-            QMetaObject::Connection destroyConnection;
-            quint32 serial = 0;
-            QList<DataDeviceInterface *> selections;
-            QList<PrimarySelectionDeviceV1Interface *> primarySelections;
+            QPointer<SurfaceInterface> surface;
         };
         Focus focus;
     };
     Keyboard globalKeyboard;
 
-    // Touch related members
-    struct Touch
+    struct DataDevice
     {
-        struct Interaction
-        {
-            Interaction()
-            {
-            }
-            Q_DISABLE_COPY(Interaction)
-
-            ~Interaction()
-            {
-                QObject::disconnect(destroyConnection);
-            }
-
-            SurfaceInterface *surface = nullptr;
-            QMetaObject::Connection destroyConnection;
-            QPointF firstTouchPos;
-            uint refs = 0;
-        };
-        std::unordered_map<SurfaceInterface *, std::unique_ptr<Interaction>> focus;
-
-        std::map<qint32, std::unique_ptr<TouchPoint>> ids;
+        QPointer<ClientConnection> client;
+        QList<DataDeviceInterface *> selections;
+        QList<DataOfferInterface *> selectionOffers;
+        QList<PrimarySelectionDeviceV1Interface *> primarySelections;
+        QList<PrimarySelectionOfferV1Interface *> primarySelectionOffers;
     };
-    Touch globalTouch;
+    DataDevice globalDataDevice;
 
     struct Drag
     {
@@ -144,17 +131,21 @@ public:
             None,
             Pointer,
             Touch,
+            Tablet,
         };
         Mode mode = Mode::None;
         AbstractDataSource *source = nullptr;
         QPointer<SurfaceInterface> surface;
         QPointer<AbstractDropHandler> target;
         QPointer<DragAndDropIcon> dragIcon;
+        QPointF position;
         QMatrix4x4 transformation;
         std::optional<quint32> dragImplicitGrabSerial;
         QMetaObject::Connection dragSourceDestroyConnection;
     };
     Drag drag;
+
+    bool startDrag(Drag::Mode mode, AbstractDataSource *source, SurfaceInterface *sourceSurface, const QPointF &position, const QMatrix4x4 &inputTransformation, quint32 dragSerial, DragAndDropIcon *dragIcon);
 
 protected:
     void seat_bind_resource(Resource *resource) override;

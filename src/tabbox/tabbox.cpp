@@ -200,29 +200,6 @@ void TabBoxHandlerImpl::raiseClient(Window *c) const
     Workspace::self()->raiseWindow(c);
 }
 
-void TabBoxHandlerImpl::restack(Window *c, Window *under)
-{
-    Workspace::self()->stackBelow(c, under);
-}
-
-void TabBoxHandlerImpl::elevateClient(Window *c, QWindow *tabbox, bool b) const
-{
-    c->elevate(b);
-    if (Window *w = Workspace::self()->findInternal(tabbox)) {
-        w->elevate(b);
-    }
-}
-
-void TabBoxHandlerImpl::shadeClient(Window *c, bool b) const
-{
-    c->cancelShadeHoverTimer(); // stop core shading action
-    if (!b && c->shadeMode() == ShadeNormal) {
-        c->setShade(ShadeHover);
-    } else if (b && c->shadeMode() == ShadeHover) {
-        c->setShade(ShadeNormal);
-    }
-}
-
 Window *TabBoxHandlerImpl::desktopClient() const
 {
     const auto stackingOrder = Workspace::self()->stackingOrder();
@@ -614,7 +591,7 @@ bool TabBox::handleMouseEvent(QMouseEvent *event)
         // fall through
     case QEvent::MouseButtonRelease:
     default:
-        // we do not filter it out, the intenal filter takes care
+        // we do not filter it out, the internal filter takes care
         return false;
     }
     return false;
@@ -661,6 +638,9 @@ static bool areModKeysDepressed(const QList<QKeySequence> &shortcuts)
     }
 
     for (const QKeySequence &seq : shortcuts) {
+        if (seq.isEmpty()) {
+            continue;
+        }
         const Qt::KeyboardModifiers mod = seq[seq.count() - 1].keyboardModifiers();
         const Qt::KeyboardModifiers mods = input()->modifiersRelevantForGlobalShortcuts();
 
@@ -741,13 +721,6 @@ void TabBox::slotWalkBackThroughCurrentAppWindowsAlternative()
     navigatingThroughWindows(false, m_cutWalkThroughCurrentAppWindowsAlternativeReverse, TabBoxCurrentAppWindowsAlternativeMode);
 }
 
-void TabBox::shadeActivate(Window *c)
-{
-    if ((c->shadeMode() == ShadeNormal || c->shadeMode() == ShadeHover) && options->isShadeHover()) {
-        c->setShade(ShadeActivated);
-    }
-}
-
 bool TabBox::toggle(ElectricBorder eb)
 {
     if (m_borderAlternativeActivate.contains(eb)) {
@@ -821,7 +794,7 @@ void TabBox::CDEWalkThroughWindows(bool forward)
             continue;
         }
         if (t->isClient() && t->isOnCurrentActivity() && t->isOnCurrentDesktop() && !t->isSpecialWindow()
-            && !t->isShade() && t->isShown() && t->wantsTabFocus()
+            && t->isShown() && t->wantsTabFocus()
             && !t->keepAbove() && !t->keepBelow()) {
             c = t;
             break;
@@ -853,7 +826,6 @@ void TabBox::CDEWalkThroughWindows(bool forward)
         }
         if (options->focusPolicyIsReasonable()) {
             Workspace::self()->activateWindow(nc);
-            shadeActivate(nc);
         } else {
             if (!nc->isOnCurrentDesktop()) {
                 VirtualDesktopManager::self()->setCurrent(nc->desktops().constLast());
@@ -874,7 +846,6 @@ void TabBox::KDEOneStepThroughWindows(bool forward, TabBoxMode mode)
 
     if (Window *c = currentClient()) {
         Workspace::self()->activateWindow(c);
-        shadeActivate(c);
     }
 }
 
@@ -917,7 +888,7 @@ TabBox::Direction TabBox::matchShortcuts(const KeyboardKeyEvent &keyEvent, const
     }
 
     // if the shortcuts do not match, try matching again after filtering the shift key
-    // it is needed to handle correctly the ALT+~ shorcut for example as it is coded as ALT+SHIFT+~ in keyQt
+    // it is needed to handle correctly the ALT+~ shortcut for example as it is coded as ALT+SHIFT+~ in keyQt
     if (contains(forward, (keyEvent.modifiers & ~Qt::ShiftModifier) | keyEvent.key)) {
         return Forward;
     }
@@ -1013,7 +984,6 @@ void TabBox::accept(bool closeTabBox)
     }
     if (c) {
         Workspace::self()->activateWindow(c);
-        shadeActivate(c);
         if (c->isDesktop()) {
             Workspace::self()->setShowingDesktop(!Workspace::self()->showingDesktop(), !m_defaultConfig.isHighlightWindows());
         }

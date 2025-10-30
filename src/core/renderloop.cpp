@@ -30,25 +30,11 @@ RenderLoopPrivate::RenderLoopPrivate(RenderLoop *q, Output *output)
     : q(q)
     , output(output)
 {
-    compositeTimer.setSingleShot(true);
-    compositeTimer.setTimerType(Qt::PreciseTimer);
-
-    QObject::connect(&compositeTimer, &QTimer::timeout, q, [this]() {
-        dispatch();
-    });
-
-    delayedVrrTimer.setSingleShot(true);
-    delayedVrrTimer.setInterval(1'000 / 30);
-    delayedVrrTimer.setTimerType(Qt::PreciseTimer);
-
-    QObject::connect(&delayedVrrTimer, &QTimer::timeout, q, [q]() {
-        q->scheduleRepaint(nullptr, nullptr);
-    });
 }
 
 void RenderLoopPrivate::scheduleNextRepaint()
 {
-    if (kwinApp()->isTerminating() || compositeTimer.isActive()) {
+    if (kwinApp()->isTerminating() || compositeTimer.isActive() || preparingNewFrame) {
         return;
     }
     scheduleRepaint(nextPresentationTimestamp);
@@ -122,7 +108,7 @@ void RenderLoopPrivate::scheduleRepaint(std::chrono::nanoseconds lastTargetTimes
     }
 
     const std::chrono::nanoseconds nextRenderTimestamp = nextPresentationTimestamp - expectedCompositingTime;
-    compositeTimer.start(std::max(0ms, std::chrono::duration_cast<std::chrono::milliseconds>(nextRenderTimestamp - currentTime)));
+    compositeTimer.start(std::max(0ms, std::chrono::duration_cast<std::chrono::milliseconds>(nextRenderTimestamp - currentTime)), Qt::PreciseTimer, q);
 }
 
 void RenderLoopPrivate::delayScheduleRepaint()
@@ -186,6 +172,19 @@ void RenderLoopPrivate::notifyVblank(std::chrono::nanoseconds timestamp)
     }
 }
 
+void RenderLoop::timerEvent(QTimerEvent *event)
+{
+    if (event->timerId() == d->compositeTimer.timerId()) {
+        d->compositeTimer.stop();
+        d->dispatch();
+    } else if (event->timerId() == d->delayedVrrTimer.timerId()) {
+        d->delayedVrrTimer.stop();
+        scheduleRepaint(nullptr, nullptr);
+    } else {
+        QObject::timerEvent(event);
+    }
+}
+
 void RenderLoopPrivate::dispatch()
 {
     Q_EMIT q->frameRequested(q);
@@ -222,6 +221,12 @@ void RenderLoop::uninhibit()
 void RenderLoop::prepareNewFrame()
 {
     d->pendingFrameCount++;
+    d->preparingNewFrame = true;
+}
+
+void RenderLoop::newFramePrepared()
+{
+    d->preparingNewFrame = false;
 }
 
 int RenderLoop::refreshRate() const
@@ -243,14 +248,15 @@ void RenderLoop::setPresentationSafetyMargin(std::chrono::nanoseconds safetyMarg
     d->safetyMargin = safetyMargin;
 }
 
-void RenderLoop::scheduleRepaint(Item *item, RenderLayer *layer, OutputLayer *outputLayer)
+void RenderLoop::scheduleRepaint(Item *item, OutputLayer *outputLayer)
 {
     const bool vrr = d->presentationMode == PresentationMode::AdaptiveSync || d->presentationMode == PresentationMode::AdaptiveAsync;
     const bool tearing = d->presentationMode == PresentationMode::Async || d->presentationMode == PresentationMode::AdaptiveAsync;
     if ((vrr || tearing) && workspace() && workspace()->activeWindow() && d->output) {
-        Window *const activeWindow = workspace()->activeWindow();
-        if ((item || layer || outputLayer) && activeWindowControlsVrrRefreshRate() && item != activeWindow->surfaceItem()) {
-            d->delayedVrrTimer.start();
+        SurfaceItem *const surfaceItem = workspace()->activeWindow()->surfaceItem();
+        if ((item || outputLayer) && activeWindowControlsVrrRefreshRate() && item != surfaceItem && !surfaceItem->isAncestorOf(item)) {
+            constexpr std::chrono::milliseconds s_delayVrrTimer = 1'000ms / 30;
+            d->delayedVrrTimer.start(s_delayVrrTimer, Qt::PreciseTimer, this);
             return;
         }
     }
@@ -269,7 +275,9 @@ bool RenderLoop::activeWindowControlsVrrRefreshRate() const
     return activeWindow
         && activeWindow->isOnOutput(d->output)
         && activeWindow->surfaceItem()
-        && activeWindow->surfaceItem()->recursiveFrameTimeEstimation() <= std::chrono::nanoseconds(1'000'000'000) / 30;
+        && activeWindow->surfaceItem()->recursiveFrameTimeEstimation().transform([](const auto t) {
+        return t <= std::chrono::nanoseconds(1'000'000'000) / 30;
+    }).value_or(false);
 }
 
 std::chrono::nanoseconds RenderLoop::lastPresentationTimestamp() const

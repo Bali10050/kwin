@@ -24,6 +24,10 @@
 
 #include <linux/input.h>
 
+#ifndef KWIN_BUILD_TESTING
+#include "workspace.h"
+#endif
+
 namespace KWin
 {
 namespace LibInput
@@ -156,6 +160,7 @@ enum class ConfigKey {
     InputArea,
     TabletToolRelativeMode,
     Rotation,
+    OutputUuid,
 };
 
 struct ConfigDataBase
@@ -255,7 +260,8 @@ static const QMap<ConfigKey, std::shared_ptr<ConfigDataBase>> s_configData{
     {ConfigKey::Orientation, std::make_shared<ConfigData<DeviceOrientation>>()},
     {ConfigKey::Calibration, std::make_shared<ConfigData<CalibrationMatrix>>()},
     {ConfigKey::TabletToolPressureCurve, std::make_shared<ConfigData<QString>>(QByteArrayLiteral("TabletToolPressureCurve"), &Device::setPressureCurve, &Device::defaultPressureCurve)},
-    {ConfigKey::OutputName, std::make_shared<ConfigData<QString>>(QByteArrayLiteral("OutputName"), &Device::setOutputName, &Device::defaultOutputName)},
+    {ConfigKey::OutputUuid, std::make_shared<ConfigData<QString>>(QByteArrayLiteral("OutputUuid"), &Device::setOutputUuid, &Device::defaultOutputUuid)},
+    {ConfigKey::OutputName, std::make_shared<ConfigData<QString>>(QByteArrayLiteral("OutputName"), &Device::setConfigOutputName, &Device::defaultOutputName)},
     {ConfigKey::OutputArea, std::make_shared<ConfigData<QRectF>>(QByteArrayLiteral("OutputArea"), &Device::setOutputArea, &Device::defaultOutputArea)},
     {ConfigKey::MapToWorkspace, std::make_shared<ConfigData<bool>>(QByteArrayLiteral("MapToWorkspace"), &Device::setMapToWorkspace, &Device::defaultMapToWorkspace)},
     {ConfigKey::TabletToolPressureRangeMin, std::make_shared<ConfigData<double>>(QByteArrayLiteral("TabletToolPressureRangeMin"), &Device::setPressureRangeMin, &Device::defaultPressureRangeMin)},
@@ -429,7 +435,6 @@ Device::Device(libinput_device *device, QObject *parent)
     }
 
     if (supportsInputArea() && m_inputArea != defaultInputArea()) {
-#if HAVE_LIBINPUT_INPUT_AREA
         const libinput_config_area_rectangle rect{
             .x1 = m_inputArea.topLeft().x(),
             .y1 = m_inputArea.topLeft().y(),
@@ -437,11 +442,33 @@ Device::Device(libinput_device *device, QObject *parent)
             .y2 = m_inputArea.bottomRight().y(),
         };
         libinput_device_config_area_set_rectangle(m_device, &rect);
-#endif
     }
 
     libinput_device_group *group = libinput_device_get_device_group(device);
     m_deviceGroupId = QCryptographicHash::hash(QString::asprintf("%p", group).toLatin1(), QCryptographicHash::Sha1).toBase64();
+
+    const int numGroups = libinput_device_tablet_pad_get_num_mode_groups(m_device);
+    m_currentModes.reserve(numGroups);
+
+    for (int groupIndex = 0; groupIndex < numGroups; ++groupIndex) {
+        const auto modeGroup = libinput_device_tablet_pad_get_mode_group(m_device, groupIndex);
+        m_currentModes.push_back(libinput_tablet_pad_mode_group_get_mode(modeGroup));
+    }
+
+    connect(this, &Device::tabletPadButtonEvent, this, [this](uint, bool, quint32 group, quint32 mode, bool isModeSwitch, std::chrono::microseconds, InputDevice *) {
+        Q_ASSERT(group < m_currentModes.length());
+        m_currentModes[group] = mode;
+        Q_EMIT currentModesChanged();
+    });
+
+    const auto udevDevice = libinput_device_get_udev_device(m_device);
+    if (udevDevice != nullptr) {
+        const auto devPath = udev_device_get_devpath(udevDevice);
+
+        // In UDev, all virtual uinput devices have a devpath start with /devices/virtual
+        m_isVirtual = strstr(devPath, "/devices/virtual/") != nullptr;
+        udev_device_unref(udevDevice);
+    }
 
     QDBusConnection::sessionBus().registerObject(QStringLiteral("/org/kde/KWin/InputDevice/") + m_sysName,
                                                  QStringLiteral("org.kde.KWin.InputDevice"),
@@ -614,6 +641,21 @@ void *Device::group() const
 int Device::tabletPadButtonCount() const
 {
     return libinput_device_tablet_pad_get_num_buttons(m_device);
+}
+
+int Device::tabletPadDialCount() const
+{
+    return libinput_device_tablet_pad_get_num_dials(m_device);
+}
+
+int Device::tabletPadRingCount() const
+{
+    return libinput_device_tablet_pad_get_num_rings(m_device);
+}
+
+int Device::tabletPadStripCount() const
+{
+    return libinput_device_tablet_pad_get_num_strips(m_device);
 }
 
 QList<InputDeviceTabletPadModeGroup> Device::modeGroups() const
@@ -857,22 +899,57 @@ void Device::setOutputName(const QString &name)
     if (name == m_outputName) {
         return;
     }
-
-    setOutput(nullptr);
-    auto outputs = kwinApp()->outputBackend()->outputs();
-    for (int i = 0; i < outputs.count(); ++i) {
-        if (!outputs[i]->isEnabled()) {
-            continue;
-        }
-        if (outputs[i]->name() == name) {
-            setOutput(outputs[i]);
-            break;
-        }
-    }
-
     m_outputName = name;
-    writeEntry(ConfigKey::OutputName, name);
+    const auto outputs = workspace()->outputs();
+    const auto it = std::ranges::find_if(outputs, [&name](Output *output) {
+        return output->name() == name;
+    });
+    if (it == outputs.end()) {
+        setOutput(nullptr);
+        m_outputUuid.clear();
+    } else {
+        auto *output = *it;
+        setOutput(output);
+        m_outputUuid = output->uuid();
+        writeEntry(ConfigKey::OutputUuid, m_outputUuid);
+    }
     Q_EMIT outputNameChanged();
+#endif
+}
+
+void Device::setConfigOutputName(const QString &name)
+{
+#ifndef KWIN_BUILD_TESTING
+    if (name == m_outputName) {
+        return;
+    }
+    if (m_outputUuid.isEmpty()) {
+        setOutputName(name);
+    }
+#endif
+}
+
+void Device::setOutputUuid(const QString &uuid)
+{
+#ifndef KWIN_BUILD_TESTING
+    if (uuid == m_outputUuid) {
+        return;
+    }
+    m_outputUuid = uuid;
+    const auto outputs = workspace()->outputs();
+    const auto it = std::ranges::find_if(outputs, [&uuid](Output *output) {
+        return output->uuid() == uuid;
+    });
+    if (it == outputs.end()) {
+        setOutput(nullptr);
+        m_outputName.clear();
+    } else {
+        auto *output = *it;
+        setOutput(output);
+        m_outputName = output->name();
+    }
+    Q_EMIT outputNameChanged();
+    writeEntry(ConfigKey::OutputUuid, uuid);
 #endif
 }
 
@@ -1006,11 +1083,7 @@ double Device::defaultPressureRangeMax() const
 
 bool Device::supportsInputArea() const
 {
-#if HAVE_LIBINPUT_INPUT_AREA
-    return true;
-#else
-    return false;
-#endif
+    return libinput_device_config_area_has_rectangle(m_device);
 }
 
 QRectF Device::inputArea() const
@@ -1023,7 +1096,6 @@ void Device::setInputArea(const QRectF &inputArea)
     if (m_inputArea != inputArea) {
         m_inputArea = inputArea;
 
-#if HAVE_LIBINPUT_INPUT_AREA
         const libinput_config_area_rectangle rect{
             .x1 = m_inputArea.topLeft().x(),
             .y1 = m_inputArea.topLeft().y(),
@@ -1031,7 +1103,6 @@ void Device::setInputArea(const QRectF &inputArea)
             .y2 = m_inputArea.bottomRight().y(),
         };
         libinput_device_config_area_set_rectangle(m_device, &rect);
-#endif
 
         writeEntry(ConfigKey::InputArea, m_inputArea);
         Q_EMIT inputAreaChanged();
@@ -1082,6 +1153,24 @@ void Device::setTabletToolRelative(bool relative)
     Q_EMIT tabletToolRelativeChanged();
 }
 
+QList<unsigned int> Device::numModes() const
+{
+    const int numGroups = libinput_device_tablet_pad_get_num_mode_groups(m_device);
+
+    QList<unsigned int> numModes;
+    numModes.reserve(numGroups);
+
+    for (int groupIndex = 0; groupIndex < numGroups; ++groupIndex) {
+        numModes.push_back(libinput_tablet_pad_mode_group_get_num_modes(libinput_device_tablet_pad_get_mode_group(m_device, groupIndex)));
+    }
+    return numModes;
+}
+
+QList<unsigned int> Device::currentModes() const
+{
+    return m_currentModes;
+}
+
 bool Device::supportsRotation() const
 {
     return libinput_device_config_rotation_is_available(m_device);
@@ -1105,6 +1194,10 @@ uint32_t Device::defaultRotation() const
     return libinput_device_config_rotation_get_default_angle(m_device);
 }
 
+bool Device::isVirtual() const
+{
+    return m_isVirtual;
+}
 }
 }
 

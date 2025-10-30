@@ -102,6 +102,9 @@ KWinTabBoxConfig::KWinTabBoxConfig(QObject *parent, const KPluginMetaData &data)
     layout->addLayout(buttonBar);
     widget()->setLayout(layout);
 
+    // Hide the separator if KNS is disabled.
+    separator->setVisible(!ghnsButton->isHidden());
+
     addConfig(m_data->tabBoxConfig(), m_primaryTabBoxUi);
     addConfig(m_data->tabBoxAlternativeConfig(), m_alternativeTabBoxUi);
 
@@ -162,7 +165,6 @@ void KWinTabBoxConfig::initLayoutLists()
         QStandardItem *item = new QStandardItem(name);
         item->setData(pluginId, Qt::UserRole);
         item->setData(path, KWinTabBoxConfigForm::LayoutPath);
-        item->setData(true, KWinTabBoxConfigForm::AddonEffect);
         model->appendRow(item);
     };
 
@@ -207,7 +209,7 @@ void KWinTabBoxConfig::initLayoutLists()
 
 void KWinTabBoxConfig::createConnections(KWinTabBoxConfigForm *form)
 {
-    connect(form, &KWinTabBoxConfigForm::effectConfigButtonClicked, this, &KWinTabBoxConfig::configureEffectClicked);
+    connect(form, &KWinTabBoxConfigForm::effectPreviewClicked, this, &KWinTabBoxConfig::showPreview);
     connect(form, &KWinTabBoxConfigForm::configChanged, this, &KWinTabBoxConfig::updateUnmanagedState);
 
     connect(this, &KWinTabBoxConfig::defaultsIndicatorsVisibleChanged, form, [form, this]() {
@@ -271,14 +273,10 @@ void KWinTabBoxConfig::defaults()
     updateUnmanagedState();
 }
 
-void KWinTabBoxConfig::configureEffectClicked()
+void KWinTabBoxConfig::showPreview()
 {
     auto form = qobject_cast<KWinTabBoxConfigForm *>(sender());
     Q_ASSERT(form);
-
-    if (!form->effectComboCurrentData(KWinTabBoxConfigForm::AddonEffect).toBool()) {
-        return;
-    }
 
     // The process will close when losing focus, but check in case of multiple calls
     if (m_previewProcess && m_previewProcess->state() != QProcess::NotRunning) {

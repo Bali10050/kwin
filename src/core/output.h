@@ -31,6 +31,7 @@ class IccProfile;
 class OutputChangeSet;
 class BrightnessDevice;
 class OutputFrame;
+class OutputLayer;
 
 /**
  * The OutputTransform type is used to describe the transform applied to the output content.
@@ -232,6 +233,11 @@ public:
      */
     QRectF mapToGlobal(const QRectF &rect) const;
 
+    /**
+     * Maps a @a region in this output coordinates to the global coordinate system.
+     */
+    QRegion mapToGlobal(const QRegion &region) const;
+
     Q_INVOKABLE QPointF mapToGlobal(const QPointF &pos) const;
     Q_INVOKABLE QPointF mapFromGlobal(const QPointF &pos) const;
 
@@ -388,8 +394,7 @@ public:
 
     bool detectedDdcCi() const;
     bool allowDdcCi() const;
-
-    const ColorDescription &colorDescription() const;
+    bool isDdcCiKnownBroken() const;
 
     BrightnessDevice *brightnessDevice() const;
     virtual void unsetBrightnessDevice();
@@ -411,9 +416,31 @@ public:
 
     virtual void setAutoRotateAvailable(bool isAvailable);
 
-    virtual bool updateCursorLayer(std::optional<std::chrono::nanoseconds> allowedVrrDelay);
-    virtual bool present(const std::shared_ptr<OutputFrame> &frame) = 0;
+    virtual bool presentAsync(OutputLayer *layer, std::optional<std::chrono::nanoseconds> allowedVrrDelay);
+    virtual bool testPresentation(const std::shared_ptr<OutputFrame> &frame) = 0;
+    virtual bool present(const QList<OutputLayer *> &layersToUpdate, const std::shared_ptr<OutputFrame> &frame) = 0;
     virtual void repairPresentation();
+
+    /**
+     * Can be used by the backend to suggest the compositor not to
+     * use overlay planes, to avoid driver issues
+     */
+    virtual bool overlayLayersLikelyBroken() const;
+
+    /**
+     * The color space in which the scene is blended
+     */
+    const std::shared_ptr<ColorDescription> &blendingColor() const;
+    /**
+     * The color space in which output layers are blended.
+     * Note that this may be different from blendingColor.
+     */
+    const std::shared_ptr<ColorDescription> &layerBlendingColor() const;
+    /**
+     * The color space that is sent to the output, after blending
+     * has happened. May be different from layerBlendingColor.
+     */
+    const std::shared_ptr<ColorDescription> &colorDescription() const;
 
 Q_SIGNALS:
     /**
@@ -459,9 +486,10 @@ Q_SIGNALS:
      */
     void changed();
 
+    void outputLayersChanged();
+
     void currentModeChanged();
     void modesChanged();
-    void outputChange(const QRegion &damagedRegion);
     void transformChanged();
     void dpmsModeChanged();
     void capabilitiesChanged();
@@ -477,6 +505,7 @@ Q_SIGNALS:
     void brightnessMetadataChanged();
     void sdrGamutWidenessChanged();
     void colorDescriptionChanged();
+    void blendingColorChanged();
     void colorProfileSourceChanged();
     void brightnessChanged();
     void colorPowerTradeoffChanged();
@@ -534,8 +563,10 @@ protected:
         std::shared_ptr<IccProfile> iccProfile;
         ColorProfileSource colorProfileSource = ColorProfileSource::sRGB;
         // color description without night light applied
-        ColorDescription originalColorDescription = ColorDescription::sRGB;
-        ColorDescription colorDescription = ColorDescription::sRGB;
+        std::shared_ptr<ColorDescription> originalColorDescription = ColorDescription::sRGB;
+        std::shared_ptr<ColorDescription> colorDescription = ColorDescription::sRGB;
+        std::shared_ptr<ColorDescription> blendingColor = ColorDescription::sRGB;
+        std::shared_ptr<ColorDescription> layerBlendingColor = ColorDescription::sRGB;
         std::optional<double> maxPeakBrightnessOverride;
         std::optional<double> maxAverageBrightnessOverride;
         std::optional<double> minBrightnessOverride;

@@ -61,6 +61,7 @@ class KWIN_EXPORT GraphicsBuffer : public QObject
 
 public:
     explicit GraphicsBuffer(QObject *parent = nullptr);
+    ~GraphicsBuffer() override;
 
     bool isReferenced() const;
     bool isDropped() const;
@@ -108,7 +109,7 @@ protected:
 
 /**
  * The GraphicsBufferRef type holds a reference to a GraphicsBuffer. While the reference
- * exists, the graphics buffer cannot be destroyed and the client cannnot modify it.
+ * exists, the graphics buffer cannot be destroyed and the client cannot modify it.
  */
 class GraphicsBufferRef
 {
@@ -130,7 +131,7 @@ public:
         : m_buffer(other.m_buffer)
     {
         if (m_buffer) {
-            m_buffer->unref();
+            m_buffer->ref();
         }
     }
 

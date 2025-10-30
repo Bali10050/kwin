@@ -78,14 +78,11 @@ class WlSource : public SelectionSource
     Q_OBJECT
 
 public:
-    WlSource(Selection *selection);
-    void setDataSourceIface(AbstractDataSource *dsi);
+    WlSource(AbstractDataSource *dataSource, Selection *selection);
 
     bool handleSelectionRequest(xcb_selection_request_event_t *event);
     void sendTargets(xcb_selection_request_event_t *event);
     void sendTimestamp(xcb_selection_request_event_t *event);
-
-    void receiveOffer(const QString &mime);
     void sendSelectionNotify(xcb_selection_request_event_t *event, bool success);
 
 Q_SIGNALS:
@@ -95,14 +92,10 @@ private:
     bool checkStartTransfer(xcb_selection_request_event_t *event);
 
     AbstractDataSource *m_dsi = nullptr;
-
-    QList<QString> m_offers;
-    QMetaObject::Connection m_offerConnection;
+    QStringList m_offers;
 
     Q_DISABLE_COPY(WlSource)
 };
-
-using Mimes = QList<QPair<QString, xcb_atom_t>>;
 
 /**
  * Representing an X data source.
@@ -117,12 +110,6 @@ public:
 
     void getTargets();
 
-    Mimes offers() const
-    {
-        return m_offers;
-    }
-    void setOffers(const Mimes &offers);
-
     XwlDataSource *dataSource() const
     {
         return m_dataSource.get();
@@ -135,15 +122,13 @@ public:
         setWindow(window);
     }
 
-    void startTransfer(const QString &mimeName, qint32 fd);
 Q_SIGNALS:
-    void offersChanged(const QStringList &added, const QStringList &removed);
-    void transferReady(xcb_atom_t target, qint32 fd);
+    void targetsReceived(const QStringList &mimeTypes);
+    void transferRequested(const QString &mimeType, qint32 fd);
 
 private:
     void handleTargets();
 
-    Mimes m_offers;
     std::unique_ptr<XwlDataSource> m_dataSource;
 
     Q_DISABLE_COPY(X11Source)

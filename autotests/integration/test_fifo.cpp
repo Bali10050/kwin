@@ -46,6 +46,7 @@ private Q_SLOTS:
     void testFifoBarriersOnly();
     void testFifoWaitOnly();
     void testFifoOnSubsurfaces();
+    void testBarrierNotClearedByEmptyCommit();
 };
 
 class FifoV1Surface : public QObject, public QtWayland::wp_fifo_v1
@@ -60,37 +61,6 @@ public:
     ~FifoV1Surface() override
     {
         wp_fifo_v1_destroy(object());
-    }
-};
-
-class WpPresentationFeedback : public QObject, public QtWayland::wp_presentation_feedback
-{
-    Q_OBJECT
-public:
-    explicit WpPresentationFeedback(struct ::wp_presentation_feedback *obj)
-        : QtWayland::wp_presentation_feedback(obj)
-    {
-    }
-
-    ~WpPresentationFeedback() override
-    {
-        wp_presentation_feedback_destroy(object());
-    }
-
-Q_SIGNALS:
-    void presented(std::chrono::nanoseconds timestamp, std::chrono::nanoseconds refreshDuration);
-    void discarded();
-
-private:
-    void wp_presentation_feedback_presented(uint32_t tv_sec_hi, uint32_t tv_sec_lo, uint32_t tv_nsec, uint32_t refresh, uint32_t seq_hi, uint32_t seq_lo, uint32_t flags) override
-    {
-        const std::chrono::nanoseconds timestamp = std::chrono::seconds((uint64_t(tv_sec_hi) << 32) | tv_sec_lo) + std::chrono::nanoseconds(tv_nsec);
-        Q_EMIT presented(timestamp, std::chrono::nanoseconds(refresh));
-    }
-
-    void wp_presentation_feedback_discarded() override
-    {
-        Q_EMIT discarded();
     }
 };
 
@@ -143,18 +113,18 @@ void FifoTest::testFifo()
 
     auto fifo = std::make_unique<FifoV1Surface>(Test::fifoManager()->get_fifo(*surface));
 
-    std::array<std::unique_ptr<WpPresentationFeedback>, 3> frames;
+    std::array<std::unique_ptr<Test::WpPresentationFeedback>, 3> frames;
 
     // commit 3 frames in quick succession: without fifo, the first two should be discarded, and the last should be presented
     for (auto &frame : frames) {
-        frame = std::make_unique<WpPresentationFeedback>(Test::presentationTime()->feedback(*surface));
+        frame = std::make_unique<Test::WpPresentationFeedback>(Test::presentationTime()->feedback(*surface));
         surface->commit(KWayland::Client::Surface::CommitFlag::None);
     }
 
     {
-        QSignalSpy discarded1(frames[0].get(), &WpPresentationFeedback::discarded);
-        QSignalSpy discarded2(frames[1].get(), &WpPresentationFeedback::discarded);
-        QSignalSpy presented(frames[2].get(), &WpPresentationFeedback::presented);
+        QSignalSpy discarded1(frames[0].get(), &Test::WpPresentationFeedback::discarded);
+        QSignalSpy discarded2(frames[1].get(), &Test::WpPresentationFeedback::discarded);
+        QSignalSpy presented(frames[2].get(), &Test::WpPresentationFeedback::presented);
 
         QVERIFY(presented.wait(100));
         QVERIFY(discarded1.count());
@@ -165,7 +135,7 @@ void FifoTest::testFifo()
     fifo->set_barrier();
     surface->commit(KWayland::Client::Surface::CommitFlag::None);
     for (auto &frame : frames) {
-        frame = std::make_unique<WpPresentationFeedback>(Test::presentationTime()->feedback(*surface));
+        frame = std::make_unique<Test::WpPresentationFeedback>(Test::presentationTime()->feedback(*surface));
         fifo->set_barrier();
         fifo->wait_barrier();
         surface->commit(KWayland::Client::Surface::CommitFlag::None);
@@ -173,9 +143,9 @@ void FifoTest::testFifo()
 
     {
         std::array<QSignalSpy, frames.size()> spies = {
-            QSignalSpy(frames[0].get(), &WpPresentationFeedback::presented),
-            QSignalSpy(frames[1].get(), &WpPresentationFeedback::presented),
-            QSignalSpy(frames[2].get(), &WpPresentationFeedback::presented),
+            QSignalSpy(frames[0].get(), &Test::WpPresentationFeedback::presented),
+            QSignalSpy(frames[1].get(), &Test::WpPresentationFeedback::presented),
+            QSignalSpy(frames[2].get(), &Test::WpPresentationFeedback::presented),
         };
         for (size_t i = 0; i < frames.size(); i++) {
             QVERIFY(spies[i].wait(100));
@@ -198,7 +168,7 @@ void FifoTest::testFifo()
     window->setMinimized(true);
 
     for (auto &frame : frames) {
-        frame = std::make_unique<WpPresentationFeedback>(Test::presentationTime()->feedback(*surface));
+        frame = std::make_unique<Test::WpPresentationFeedback>(Test::presentationTime()->feedback(*surface));
         fifo->set_barrier();
         fifo->wait_barrier();
         surface->commit(KWayland::Client::Surface::CommitFlag::None);
@@ -211,9 +181,9 @@ void FifoTest::testFifo()
     {
         const std::chrono::nanoseconds targetRefreshDuration = std::chrono::nanoseconds(1'000'000'000'000 / std::min(30'000u, refreshRate));
         std::array<QSignalSpy, frames.size()> spies = {
-            QSignalSpy(frames[0].get(), &WpPresentationFeedback::discarded),
-            QSignalSpy(frames[1].get(), &WpPresentationFeedback::discarded),
-            QSignalSpy(frames[2].get(), &WpPresentationFeedback::discarded),
+            QSignalSpy(frames[0].get(), &Test::WpPresentationFeedback::discarded),
+            QSignalSpy(frames[1].get(), &Test::WpPresentationFeedback::discarded),
+            QSignalSpy(frames[2].get(), &Test::WpPresentationFeedback::discarded),
         };
         for (size_t i = 0; i < frames.size(); i++) {
             const auto before = std::chrono::steady_clock::now();
@@ -238,10 +208,10 @@ void FifoTest::testFifoInitiallyHidden()
 
     auto fifo = std::make_unique<FifoV1Surface>(Test::fifoManager()->get_fifo(*surface));
 
-    std::array<std::unique_ptr<WpPresentationFeedback>, 3> frames;
+    std::array<std::unique_ptr<Test::WpPresentationFeedback>, 3> frames;
 
     for (auto &frame : frames) {
-        frame = std::make_unique<WpPresentationFeedback>(Test::presentationTime()->feedback(*surface));
+        frame = std::make_unique<Test::WpPresentationFeedback>(Test::presentationTime()->feedback(*surface));
         fifo->set_barrier();
         fifo->wait_barrier();
         surface->commit(KWayland::Client::Surface::CommitFlag::None);
@@ -253,9 +223,9 @@ void FifoTest::testFifoInitiallyHidden()
 
     {
         std::array<QSignalSpy, frames.size()> spies = {
-            QSignalSpy(frames[0].get(), &WpPresentationFeedback::discarded),
-            QSignalSpy(frames[1].get(), &WpPresentationFeedback::discarded),
-            QSignalSpy(frames[2].get(), &WpPresentationFeedback::discarded),
+            QSignalSpy(frames[0].get(), &Test::WpPresentationFeedback::discarded),
+            QSignalSpy(frames[1].get(), &Test::WpPresentationFeedback::discarded),
+            QSignalSpy(frames[2].get(), &Test::WpPresentationFeedback::discarded),
         };
         for (size_t i = 0; i < frames.size(); i++) {
             const auto before = std::chrono::steady_clock::now();
@@ -279,10 +249,10 @@ void FifoTest::testFifoBarriersOnly()
 
     auto fifo = std::make_unique<FifoV1Surface>(Test::fifoManager()->get_fifo(*surface));
 
-    std::array<std::unique_ptr<WpPresentationFeedback>, 3> frames;
+    std::array<std::unique_ptr<Test::WpPresentationFeedback>, 3> frames;
 
     for (auto &frame : frames) {
-        frame = std::make_unique<WpPresentationFeedback>(Test::presentationTime()->feedback(*surface));
+        frame = std::make_unique<Test::WpPresentationFeedback>(Test::presentationTime()->feedback(*surface));
         fifo->set_barrier();
         surface->commit(KWayland::Client::Surface::CommitFlag::None);
     }
@@ -292,9 +262,9 @@ void FifoTest::testFifoBarriersOnly()
 
     {
         std::array<QSignalSpy, frames.size()> spies = {
-            QSignalSpy(frames[0].get(), &WpPresentationFeedback::discarded),
-            QSignalSpy(frames[1].get(), &WpPresentationFeedback::discarded),
-            QSignalSpy(frames[2].get(), &WpPresentationFeedback::discarded),
+            QSignalSpy(frames[0].get(), &Test::WpPresentationFeedback::discarded),
+            QSignalSpy(frames[1].get(), &Test::WpPresentationFeedback::discarded),
+            QSignalSpy(frames[2].get(), &Test::WpPresentationFeedback::discarded),
         };
         for (auto &spy : spies) {
             QVERIFY(spy.count() || spy.wait(100));
@@ -314,10 +284,10 @@ void FifoTest::testFifoWaitOnly()
 
     auto fifo = std::make_unique<FifoV1Surface>(Test::fifoManager()->get_fifo(*surface));
 
-    std::array<std::unique_ptr<WpPresentationFeedback>, 3> frames;
+    std::array<std::unique_ptr<Test::WpPresentationFeedback>, 3> frames;
 
     for (auto &frame : frames) {
-        frame = std::make_unique<WpPresentationFeedback>(Test::presentationTime()->feedback(*surface));
+        frame = std::make_unique<Test::WpPresentationFeedback>(Test::presentationTime()->feedback(*surface));
         fifo->wait_barrier();
         surface->commit(KWayland::Client::Surface::CommitFlag::None);
     }
@@ -327,9 +297,9 @@ void FifoTest::testFifoWaitOnly()
 
     {
         std::array<QSignalSpy, frames.size()> spies = {
-            QSignalSpy(frames[0].get(), &WpPresentationFeedback::discarded),
-            QSignalSpy(frames[1].get(), &WpPresentationFeedback::discarded),
-            QSignalSpy(frames[2].get(), &WpPresentationFeedback::discarded),
+            QSignalSpy(frames[0].get(), &Test::WpPresentationFeedback::discarded),
+            QSignalSpy(frames[1].get(), &Test::WpPresentationFeedback::discarded),
+            QSignalSpy(frames[2].get(), &Test::WpPresentationFeedback::discarded),
         };
         for (auto &spy : spies) {
             QVERIFY(spy.count() || spy.wait(100));
@@ -359,12 +329,12 @@ void FifoTest::testFifoOnSubsurfaces()
     Test::render(surface.get(), QSize(100, 50), Qt::red);
 
     auto fifo = std::make_unique<FifoV1Surface>(Test::fifoManager()->get_fifo(*surface));
-    std::array<std::unique_ptr<WpPresentationFeedback>, 3> frames;
+    std::array<std::unique_ptr<Test::WpPresentationFeedback>, 3> frames;
 
     // when the surface is desync, fifo should work like on a toplevel surface
     subsurface->setMode(KWayland::Client::SubSurface::Mode::Desynchronized);
     for (auto &frame : frames) {
-        frame = std::make_unique<WpPresentationFeedback>(Test::presentationTime()->feedback(*surface));
+        frame = std::make_unique<Test::WpPresentationFeedback>(Test::presentationTime()->feedback(*surface));
         fifo->set_barrier();
         fifo->wait_barrier();
         surface->commit(KWayland::Client::Surface::CommitFlag::None);
@@ -376,9 +346,9 @@ void FifoTest::testFifoOnSubsurfaces()
 
     {
         std::array<QSignalSpy, frames.size()> spies = {
-            QSignalSpy(frames[0].get(), &WpPresentationFeedback::presented),
-            QSignalSpy(frames[1].get(), &WpPresentationFeedback::presented),
-            QSignalSpy(frames[2].get(), &WpPresentationFeedback::presented),
+            QSignalSpy(frames[0].get(), &Test::WpPresentationFeedback::presented),
+            QSignalSpy(frames[1].get(), &Test::WpPresentationFeedback::presented),
+            QSignalSpy(frames[2].get(), &Test::WpPresentationFeedback::presented),
         };
         for (auto &spy : spies) {
             QVERIFY(spy.wait(100));
@@ -388,7 +358,7 @@ void FifoTest::testFifoOnSubsurfaces()
     // when the surface is synchronized though, fifo should be ignored
     subsurface->setMode(KWayland::Client::SubSurface::Mode::Synchronized);
     for (auto &frame : frames) {
-        frame = std::make_unique<WpPresentationFeedback>(Test::presentationTime()->feedback(*surface));
+        frame = std::make_unique<Test::WpPresentationFeedback>(Test::presentationTime()->feedback(*surface));
         fifo->set_barrier();
         fifo->wait_barrier();
         surface->commit(KWayland::Client::Surface::CommitFlag::None);
@@ -400,14 +370,50 @@ void FifoTest::testFifoOnSubsurfaces()
 
     {
         std::array<QSignalSpy, frames.size()> spies = {
-            QSignalSpy(frames[0].get(), &WpPresentationFeedback::discarded),
-            QSignalSpy(frames[1].get(), &WpPresentationFeedback::discarded),
-            QSignalSpy(frames[2].get(), &WpPresentationFeedback::discarded),
+            QSignalSpy(frames[0].get(), &Test::WpPresentationFeedback::discarded),
+            QSignalSpy(frames[1].get(), &Test::WpPresentationFeedback::discarded),
+            QSignalSpy(frames[2].get(), &Test::WpPresentationFeedback::discarded),
         };
         for (auto &spy : spies) {
             QVERIFY(spy.count() || spy.wait(100));
         }
     }
+}
+
+void FifoTest::testBarrierNotClearedByEmptyCommit()
+{
+    std::unique_ptr<KWayland::Client::Surface> surface(Test::createSurface());
+    std::unique_ptr<Test::XdgToplevel> shellSurface(Test::createXdgToplevelSurface(surface.get()));
+    auto window = Test::renderAndWaitForShown(surface.get(), QSize(100, 50), Qt::blue);
+    QVERIFY(window);
+
+    auto fifo = std::make_unique<FifoV1Surface>(Test::fifoManager()->get_fifo(*surface));
+
+    std::array<std::unique_ptr<Test::WpPresentationFeedback>, 2> frames;
+
+    fifo->set_barrier();
+    surface->commit(KWayland::Client::Surface::CommitFlag::None);
+
+    // this additional commit must not clear the barrier
+    auto firstFrame = std::make_unique<Test::WpPresentationFeedback>(Test::presentationTime()->feedback(*surface));
+    surface->commit(KWayland::Client::Surface::CommitFlag::None);
+
+    auto secondFrame = std::make_unique<Test::WpPresentationFeedback>(Test::presentationTime()->feedback(*surface));
+    fifo->wait_barrier();
+    surface->commit(KWayland::Client::Surface::CommitFlag::None);
+
+    QSignalSpy firstSpy(firstFrame.get(), &Test::WpPresentationFeedback::presented);
+    QVERIFY(firstSpy.wait(100));
+
+    QSignalSpy secondSpy(secondFrame.get(), &Test::WpPresentationFeedback::presented);
+    QVERIFY(secondSpy.wait(100));
+
+    // the second frame should be presented in the refresh cycle after the first one
+    const auto thisTimestamp = secondSpy.last().at(0).value<std::chrono::nanoseconds>();
+    const auto lastTimestamp = firstSpy.last().at(0).value<std::chrono::nanoseconds>();
+    const auto refreshDuration = secondSpy.last().at(1).value<std::chrono::nanoseconds>();
+    const auto diff = thisTimestamp - lastTimestamp;
+    QCOMPARE_GT(diff, refreshDuration / 2);
 }
 }
 

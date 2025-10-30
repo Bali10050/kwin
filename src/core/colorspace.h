@@ -25,7 +25,7 @@ enum class RenderingIntent {
     /* colorimetric mapping between color spaces, with whitepoint adaptation */
     RelativeColorimetric,
     /* colorimetric mapping between color spaces, without whitepoint adaptation */
-    AbsoluteColorimetric,
+    AbsoluteColorimetricNoAdaptation,
     /* colorimetric mapping between color spaces, with whitepoint adaptation and black point compensation */
     RelativeColorimetricWithBPC,
 };
@@ -162,12 +162,14 @@ public:
         linear = 1,
         PerceptualQuantizer = 2,
         gamma22 = 3,
+        BT1886 = 4,
     };
     explicit TransferFunction(Type tf);
     explicit TransferFunction(Type tf, double minLuminance, double maxLuminance);
 
     bool operator==(const TransferFunction &) const;
 
+    bool hasLinearMinLuminance() const;
     bool isRelative() const;
     TransferFunction relativeScaledTo(double referenceLuminance) const;
     double encodedToNits(double encoded) const;
@@ -176,6 +178,9 @@ public:
     QVector3D nitsToEncoded(const QVector3D &nits) const;
     QVector4D encodedToNits(const QVector4D &encoded) const;
     QVector4D nitsToEncoded(const QVector4D &nits) const;
+
+    double bt1886A() const;
+    double bt1886B() const;
 
     Type type;
     /**
@@ -221,7 +226,7 @@ public:
      * @param sdrColorimetry
      */
     explicit ColorDescription(const Colorimetry &containerColorimetry, TransferFunction tf, double referenceLuminance, double minLuminance, std::optional<double> maxAverageLuminance, std::optional<double> maxHdrLuminance, YUVMatrixCoefficients yuvCoefficients = YUVMatrixCoefficients::Identity, EncodingRange range = EncodingRange::Full);
-    explicit ColorDescription(const Colorimetry &containerColorimetry, TransferFunction tf, double referenceLuminance, double minLuminance, std::optional<double> maxAverageLuminance, std::optional<double> maxHdrLuminance, std::optional<Colorimetry> masteringColorimetry, const Colorimetry &sdrColorimetry, YUVMatrixCoefficients yuvCoefficients = YUVMatrixCoefficients::Identity, EncodingRange range = EncodingRange::Full);
+    explicit ColorDescription(const Colorimetry &containerColorimetry, TransferFunction tf, double referenceLuminance, double minLuminance, std::optional<double> maxAverageLuminance, std::optional<double> maxHdrLuminance, const Colorimetry &masteringColorimetry, const Colorimetry &sdrColorimetry, YUVMatrixCoefficients yuvCoefficients = YUVMatrixCoefficients::Identity, EncodingRange range = EncodingRange::Full);
     explicit ColorDescription(const Colorimetry &containerColorimetry, TransferFunction tf, YUVMatrixCoefficients yuvCoefficients = YUVMatrixCoefficients::Identity, EncodingRange range = EncodingRange::Full);
 
     /**
@@ -234,7 +239,7 @@ public:
      * In most cases this will be smaller than the container colorimetry; for example a screen with an HDR mode but only rec.709 colors would have a container colorimetry of rec.2020 and a mastering colorimetry of rec.709.
      * In some cases however it can be bigger than the container colorimetry, like with scRGB. It has the container colorimetry of sRGB, but a mastering colorimetry that can be bigger (like rec.2020 for example)
      */
-    const std::optional<Colorimetry> &masteringColorimetry() const;
+    const Colorimetry &masteringColorimetry() const;
     const Colorimetry &sdrColorimetry() const;
     TransferFunction transferFunction() const;
     double referenceLuminance() const;
@@ -252,15 +257,16 @@ public:
 
     bool operator==(const ColorDescription &other) const = default;
 
-    ColorDescription withTransferFunction(const TransferFunction &func) const;
+    std::shared_ptr<ColorDescription> withTransferFunction(const TransferFunction &func) const;
     /**
      * replaces the current whitepoint with the new one
      * this does not do whitepoint adaptation!
      */
-    ColorDescription withWhitepoint(xyY newWhitePoint) const;
-    ColorDescription dimmed(double brightnessFactor) const;
-    ColorDescription withReference(double referenceLuminance) const;
-    ColorDescription withYuvCoefficients(YUVMatrixCoefficients coefficient, EncodingRange range) const;
+    std::shared_ptr<ColorDescription> withWhitepoint(xyY newWhitePoint) const;
+    std::shared_ptr<ColorDescription> dimmed(double brightnessFactor) const;
+    std::shared_ptr<ColorDescription> withReference(double referenceLuminance) const;
+    std::shared_ptr<ColorDescription> withHdrMetadata(double maxAverageLuminance, double maxLuminance) const;
+    std::shared_ptr<ColorDescription> withYuvCoefficients(YUVMatrixCoefficients coefficient, EncodingRange range) const;
 
     /**
      * @returns a matrix that transforms from linear RGB in this color description to linear RGB in the other one
@@ -271,11 +277,12 @@ public:
     /**
      * This color description describes display-referred sRGB, with a gamma22 transfer function
      */
-    static const ColorDescription sRGB;
+    static const std::shared_ptr<ColorDescription> sRGB;
+    static const std::shared_ptr<ColorDescription> BT2020PQ;
 
 private:
     Colorimetry m_containerColorimetry;
-    std::optional<Colorimetry> m_masteringColorimetry;
+    Colorimetry m_masteringColorimetry;
     TransferFunction m_transferFunction;
     Colorimetry m_sdrColorimetry;
     double m_referenceLuminance;
@@ -285,6 +292,14 @@ private:
     YUVMatrixCoefficients m_yuvCoefficients = YUVMatrixCoefficients::Identity;
     EncodingRange m_range = EncodingRange::Full;
 };
+}
+
+inline bool operator==(const std::shared_ptr<KWin::ColorDescription> &left, const std::shared_ptr<KWin::ColorDescription> &right)
+{
+    if (!left || !right) {
+        return left.get() == right.get();
+    }
+    return left.get() == right.get() || *left == *right;
 }
 
 KWIN_EXPORT QDebug operator<<(QDebug debug, const KWin::TransferFunction &tf);

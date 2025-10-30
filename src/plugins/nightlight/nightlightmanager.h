@@ -19,7 +19,9 @@
 #include <QObject>
 #include <QPair>
 
+class KDarkLightScheduleProvider;
 class KSystemClockSkewNotifier;
+class NightLightState;
 class QTimer;
 
 namespace KWin
@@ -34,27 +36,13 @@ typedef QPair<QDateTime, QDateTime> DateTimes;
  */
 enum NightLightMode {
     /**
-     * Color temperature is computed based on the current position of the Sun.
-     *
-     * Location of the user is provided by Plasma.
-     */
-    Automatic,
-    /**
-     * Color temperature is computed based on the current position of the Sun.
-     *
-     * Location of the user is provided by themselves.
-     */
-    Location,
-    /**
-     * Color temperature is computed based on the current time.
-     *
-     * Sunrise and sunset times have to be specified by the user.
-     */
-    Timings,
-    /**
-     * Color temperature is constant thoughout the day.
+     * Color temperature is constant throughout the day.
      */
     Constant,
+    /**
+     * The color temperature is adjusted based on time of day.
+     */
+    DarkLight,
 };
 
 /**
@@ -80,8 +68,6 @@ class KWIN_EXPORT NightLightManager : public Plugin
 public:
     explicit NightLightManager();
     ~NightLightManager() override;
-
-    void autoLocationUpdate(double latitude, double longitude);
 
     /**
      * Toggles the active state of the filter.
@@ -219,12 +205,12 @@ Q_SIGNALS:
     void targetTemperatureChanged();
 
     /**
-     * Emitted whenver the operation mode has changed.
+     * Emitted whenever the operation mode has changed.
      */
     void modeChanged();
 
     /**
-     * Emitted whenver night light has switched between day and night time.
+     * Emitted whenever night light has switched between day and night time.
      */
     void daylightChanged();
 
@@ -268,6 +254,9 @@ private:
     NightLightDBusInterface *m_iface;
     KSystemClockSkewNotifier *m_skewNotifier;
 
+    std::unique_ptr<NightLightState> m_stateConfig;
+    std::unique_ptr<KDarkLightScheduleProvider> m_darkLightScheduler;
+
     // Specifies whether Night Light is enabled.
     bool m_active = false;
 
@@ -277,7 +266,7 @@ private:
     // Specifies whether Night Light is inhibited globally.
     bool m_isGloballyInhibited = false;
 
-    NightLightMode m_mode = NightLightMode::Automatic;
+    NightLightMode m_mode = NightLightMode::DarkLight;
 
     // the previous and next sunrise/sunset intervals - in UTC time
     DateTimes m_prev = DateTimes();
@@ -285,18 +274,6 @@ private:
 
     // whether it is currently day or night
     bool m_daylight = true;
-
-    // manual times from config
-    QTime m_morning = QTime(6, 0);
-    QTime m_evening = QTime(18, 0);
-    int m_transitionDuration = DEFAULT_TRANSITION_DURATION; // in milliseconds
-
-    // auto location provided by work space
-    double m_latitudeAuto;
-    double m_longitudeAuto;
-    // manual location from config
-    double m_latitudeFixed;
-    double m_longitudeFixed;
 
     std::unique_ptr<QTimer> m_slowUpdateStartTimer;
     std::unique_ptr<QTimer> m_slowUpdateTimer;

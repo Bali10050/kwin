@@ -30,7 +30,7 @@ ExpoCell {
 
     // no desktops is a special value which means "All Desktops"
     readonly property bool presentOnCurrentDesktop: !window.desktops.length || window.desktops.indexOf(KWinComponents.Workspace.currentDesktop) !== -1
-    readonly property bool initialHidden: window.minimized || !presentOnCurrentDesktop
+    readonly property bool initialHidden: window.minimized
     readonly property bool activeHidden: {
         if (window.skipSwitcher) {
             return true;
@@ -149,7 +149,7 @@ ExpoCell {
             }
             function restoreDND(oldGlobalRect: rect) {
                 const newGlobalRect = mapFromItem(null, oldGlobalRect);
-                // We need proper mapping for the heap geometry becuase they are positioned with
+                // We need proper mapping for the heap geometry because they are positioned with
                 // translation transformations
                 const heapRect = thumb.windowHeap.mapToItem(null, Qt.size(thumb.windowHeap.width, thumb.windowHeap.height));
                 // Disable bindings
@@ -173,7 +173,7 @@ ExpoCell {
 
             // Not using FrameSvg hover element intentionally for stylistic reasons
             Rectangle {
-                border.width: Kirigami.Units.largeSpacing
+                border.width: 6
                 border.color: Kirigami.Theme.highlightColor
                 anchors.fill: parent
                 anchors.margins: -border.width

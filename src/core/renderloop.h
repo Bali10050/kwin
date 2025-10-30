@@ -17,7 +17,6 @@ class RenderLoopPrivate;
 class SurfaceItem;
 class Item;
 class Output;
-class RenderLayer;
 class OutputLayer;
 
 /**
@@ -51,10 +50,16 @@ public:
     void uninhibit();
 
     /**
-     * This function must be called before the Compositor sumbits the next
-     * frame.
+     * This function must be called before the Compositor prepares a new frame.
+     * Note that this inhibits scheduleRepaint requests, without re-applying the
+     * missed requests afterwards
      */
     void prepareNewFrame();
+
+    /**
+     * This function must be called after the Compositor, and uninhibits the renderloop
+     */
+    void newFramePrepared();
 
     /**
      * Returns the refresh rate at which the output is being updated, in millihertz.
@@ -71,7 +76,7 @@ public:
     /**
      * Schedules a compositing cycle at the next available moment.
      */
-    void scheduleRepaint(Item *item = nullptr, RenderLayer *layer = nullptr, OutputLayer *outputLayer = nullptr);
+    void scheduleRepaint(Item *item = nullptr, OutputLayer *outputLayer = nullptr);
 
     /**
      * Returns the timestamp of the last frame that has been presented on the screen.
@@ -98,6 +103,8 @@ public:
     // TODO integrate cursor updates into the render loop / frame scheduling somehow?
     // and then remove this again
     bool activeWindowControlsVrrRefreshRate() const;
+
+    void timerEvent(QTimerEvent *event) override;
 
 Q_SIGNALS:
     /**

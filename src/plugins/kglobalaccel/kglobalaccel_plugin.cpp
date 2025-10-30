@@ -24,32 +24,18 @@ bool KGlobalAccelImpl::grabKey(int key, bool grab)
     return true;
 }
 
-void KGlobalAccelImpl::setEnabled(bool enabled)
+bool KGlobalAccelImpl::checkKeyPressed(int keyQt, KWin::KeyboardKeyState state)
 {
-    if (m_shuttingDown) {
-        return;
+    switch (state) {
+    case KWin::KeyboardKeyState::Pressed:
+        return keyEvent(keyQt, ShortcutKeyState::Pressed);
+    case KWin::KeyboardKeyState::Repeated:
+        return keyEvent(keyQt, ShortcutKeyState::Repeated);
+    case KWin::KeyboardKeyState::Released:
+        return keyEvent(keyQt, ShortcutKeyState::Released);
     }
-    static KWin::InputRedirection *s_input = KWin::InputRedirection::self();
-    if (!s_input) {
-        qFatal("This plugin is intended to be used with KWin and this is not KWin, exiting now");
-    } else {
-        if (!m_inputDestroyedConnection) {
-            m_inputDestroyedConnection = connect(s_input, &QObject::destroyed, this, [this] {
-                m_shuttingDown = true;
-            });
-        }
-    }
-    s_input->registerGlobalAccel(enabled ? this : nullptr);
-}
 
-bool KGlobalAccelImpl::checkKeyPressed(int keyQt)
-{
-    return keyPressed(keyQt);
-}
-
-bool KGlobalAccelImpl::checkKeyReleased(int keyQt)
-{
-    return keyReleased(keyQt);
+    return false;
 }
 
 bool KGlobalAccelImpl::checkPointerPressed(Qt::MouseButtons buttons)

@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: \n"
 "Report-Msgid-Bugs-To: https://bugs.kde.org\n"
-"POT-Creation-Date: 2025-04-19 00:43+0000\n"
+"POT-Creation-Date: 2025-09-23 00:44+0000\n"
 "PO-Revision-Date: 2025-05-18 10:05+0200\n"
 "Last-Translator: Adrián Chaves (Gallaecio) <adrian@chaves.gal>\n"
 "Language-Team: Proxecto Trasno (proxecto@trasno.gal)\n"
@@ -19,52 +19,53 @@ msgstr ""
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
 "X-Generator: Lokalize 25.04.1\n"
 
-#: layoutpreview.cpp:27
+#: layoutpreview.cpp:28
 #, kde-format
 msgid "Launch an interactive preview for a tabbox switcher"
 msgstr ""
 "Iniciar unha vista previa interactiva dun selector de grupo de separadores."
 
-#: layoutpreview.cpp:28
+#: layoutpreview.cpp:29
 #, kde-format
 msgid "Path to the Window Switcher QML main file"
 msgstr "Ruta do ficheiro principal de QML do selector de xanelas."
 
-#: layoutpreview.cpp:29
+#: layoutpreview.cpp:30
 #, kde-format
 msgid "Show also a thumbnail for the desktop"
 msgstr "Amosar tamén unha miniatura para o escritorio."
 
-#: layoutpreview.cpp:156
+#: layoutpreview.cpp:159
 #, kde-format
 msgctxt "The name of KDE's file manager in this language, if translated"
 msgid "Dolphin"
 msgstr "Dolphin"
 
-#: layoutpreview.cpp:160
+#: layoutpreview.cpp:163
 #, kde-format
 msgctxt "The name of KDE's web browser in this language, if translated"
 msgid "Konqueror"
 msgstr "Konqueror"
 
-#: layoutpreview.cpp:164
+#: layoutpreview.cpp:167
 #, kde-format
 msgctxt "The name of KDE's email client in this language, if translated"
 msgid "KMail"
 msgstr "KMail"
 
-#: layoutpreview.cpp:168
+#: layoutpreview.cpp:171
 #, kde-format
 msgctxt "The name of KDE's System Settings app in this language, if translated"
 msgid "System Settings"
 msgstr "Configuración do sistema"
 
-#: layoutpreview.cpp:174
-#, kde-format
-msgid "Show Desktop"
-msgstr "Amosar o escritorio"
+#: layoutpreview.cpp:177
+#, fuzzy, kde-format
+#| msgid "Desktop:"
+msgid "Peek at Desktop"
+msgstr "Escritorio"
 
-#: layoutpreview.cpp:204
+#: layoutpreview.cpp:207
 #, kde-format
 msgctxt "An example Desktop Name"
 msgid "Desktop 1"
@@ -101,8 +102,9 @@ msgstr "Contido"
 
 #. i18n: ectx: property (text), widget (QCheckBox, showDesktop)
 #: main.ui:41
-#, kde-format
-msgid "Include \"Show Desktop\" entry"
+#, fuzzy, kde-format
+#| msgid "Include \"Show Desktop\" entry"
+msgid "Include \"Peek at Desktop\" entry"
 msgstr "Incluír a entrada de «Amosar o escritorio»."
 
 #. i18n: ectx: property (text), item, widget (QComboBox, switchingModeCombo)
@@ -324,6 +326,9 @@ msgstr "Percorrer as xanelas da aplicación actual, alternativo"
 msgid "Walk Through Windows of Current Application Alternative (Reverse)"
 msgstr "Percorrer as xanelas da aplicación actual, alternativo (inverso)"
 
+#~ msgid "Show Desktop"
+#~ msgstr "Amosar o escritorio"
+
 #~ msgid "KWin"
 #~ msgstr "KWin"
 
@@ -358,9 +363,6 @@ msgstr "Percorrer as xanelas da aplicación actual, alternativo (inverso)"
 
 #~ msgid "These settings are used by the \"Walk Through Windows\" actions."
 #~ msgstr "Estes parámetros úsanse polas accións «Percorrer as xanelas»."
-
-#~ msgid "Desktop:"
-#~ msgstr "Escritorio"
 
 #~ msgid "Windows from all desktops"
 #~ msgstr "As xanelas de todos os escritorios"

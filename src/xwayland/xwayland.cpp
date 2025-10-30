@@ -23,6 +23,7 @@
 #include "main_wayland.h"
 #include "utils/common.h"
 #include "utils/xcbutils.h"
+#include "wayland/display.h"
 #include "wayland_server.h"
 #include "waylandwindow.h"
 #include "workspace.h"
@@ -101,7 +102,8 @@ public:
                 // Xwayland client and the state is correctly restored.
                 for (auto it = m_states.constBegin(); it != m_states.constEnd(); ++it) {
                     if (it.value() == KeyboardKeyState::Pressed) {
-                        keyboard->sendKey(it.key(), KeyboardKeyState::Released, waylandServer()->xWaylandConnection());
+                        keyboard->sendKey(it.key(), KeyboardKeyState::Released, waylandServer()->xWaylandConnection(),
+                                          waylandServer()->display()->nextSerial());
                     }
                 }
                 m_modifiers = {};
@@ -267,7 +269,7 @@ public:
 
         auto xkb = input()->keyboard()->xkb();
 
-        keyboard->sendKey(event->nativeScanCode, event->state, xwaylandClient);
+        keyboard->sendKey(event->nativeScanCode, event->state, xwaylandClient, event->serial);
 
         bool changed = false;
         if (m_modifiers.depressed != xkb->modifierState().depressed) {
@@ -305,6 +307,11 @@ public:
             return false;
         }
         if (!m_filterMouse) {
+            return false;
+        }
+        if (event->button == Qt::MouseButton::LeftButton
+            || event->button == Qt::MouseButton::RightButton
+            || event->button == Qt::MouseButton::MiddleButton) {
             return false;
         }
 
@@ -538,7 +545,6 @@ void Xwayland::updatePrimary()
             return;
         }
     }
-    qCWarning(KWIN_XWL) << "Could not find a matching X RandR CRTC/output to set as primary for" << primaryOutput;
 }
 
 bool Xwayland::createX11Connection()
@@ -606,12 +612,12 @@ void Xwayland::runXWaylandStartupScripts()
     }
 }
 
-DragEventReply Xwayland::dragMoveFilter(Window *target)
+bool Xwayland::dragMoveFilter(Window *target, const QPointF &position)
 {
     if (m_dataBridge) {
-        return m_dataBridge->dragMoveFilter(target);
+        return m_dataBridge->dragMoveFilter(target, position);
     } else {
-        return DragEventReply::Wayland;
+        return false;
     }
 }
 

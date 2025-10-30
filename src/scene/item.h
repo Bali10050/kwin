@@ -8,6 +8,7 @@
 
 #include "core/colorspace.h"
 #include "effect/globals.h"
+#include "scene/borderradius.h"
 #include "scene/itemgeometry.h"
 
 #include <QList>
@@ -20,7 +21,7 @@
 namespace KWin
 {
 
-class SceneDelegate;
+class RenderView;
 class Scene;
 class SyncReleasePoint;
 class DrmDevice;
@@ -66,6 +67,8 @@ public:
     QSizeF size() const;
     void setSize(const QSizeF &size);
 
+    void setGeometry(const QRectF &rect);
+
     int z() const;
     void setZ(int z);
 
@@ -92,6 +95,17 @@ public:
 
     QTransform transform() const;
     void setTransform(const QTransform &transform);
+
+    /**
+     * Maps the given @a region from the item's coordinate system to the view's coordinate
+     * system, snapping positions to the view's coordinate grid to match the renderer
+     */
+    QRegion mapToView(const QRegion &region, const RenderView *view) const;
+    /**
+     * Maps the given @a rect from the item's coordinate system to the view's coordinate
+     * system, snapping positions to the view's coordinate grid to match the renderer
+     */
+    QRectF mapToView(const QRectF &rect, const RenderView *view) const;
 
     /**
      * Maps the given @a region from the item's coordinate system to the scene's coordinate
@@ -122,21 +136,25 @@ public:
     bool isVisible() const;
     void setVisible(bool visible);
 
-    QRect paintedArea(SceneDelegate *delegate, const QRectF &rect) const;
-    QRegion paintedArea(SceneDelegate *delegate, const QRegion &region) const;
+    BorderRadius borderRadius() const;
+    void setBorderRadius(const BorderRadius &radius);
+
+    QRect paintedArea(RenderView *delegate, const QRectF &rect) const;
+    QRegion paintedArea(RenderView *delegate, const QRegion &region) const;
 
     void scheduleRepaint(const QRectF &region);
     void scheduleSceneRepaint(const QRectF &region);
     void scheduleRepaint(const QRegion &region);
     void scheduleSceneRepaint(const QRegion &region);
-    void scheduleRepaint(SceneDelegate *delegate, const QRegion &region);
+    void scheduleRepaint(RenderView *delegate, const QRegion &region);
     void scheduleFrame();
-    QRegion takeRepaints(SceneDelegate *delegate);
-    void resetRepaints(SceneDelegate *delegate);
+    bool hasRepaints(RenderView *view) const;
+    QRegion takeRepaints(RenderView *delegate);
+    void resetRepaints(RenderView *delegate);
 
     WindowQuadList quads() const;
     virtual void preprocess();
-    const ColorDescription &colorDescription() const;
+    const std::shared_ptr<ColorDescription> &colorDescription() const;
     RenderingIntent renderingIntent() const;
     PresentationModeHint presentationHint() const;
 
@@ -144,10 +162,18 @@ public:
     void addEffect();
     void removeEffect();
 
-    virtual void framePainted(Output *output, OutputFrame *frame, std::chrono::milliseconds timestamp);
+    void framePainted(RenderView *view, Output *output, OutputFrame *frame, std::chrono::milliseconds timestamp);
+
+    bool isAncestorOf(const Item *item) const;
+    /**
+     * @returns if this Item or any of its children have contents to be rendered
+     */
+    bool hasVisibleContents() const;
 
 Q_SIGNALS:
     void childAdded(Item *item);
+    void childRemoved(Item *item);
+    void visibleChanged();
     /**
      * This signal is emitted when the position of this item has changed.
      */
@@ -167,7 +193,7 @@ protected:
     virtual WindowQuadList buildQuads() const;
     virtual void handleFramePainted(Output *output, OutputFrame *frame, std::chrono::milliseconds timestamp);
     void discardQuads();
-    void setColorDescription(const ColorDescription &description);
+    void setColorDescription(const std::shared_ptr<ColorDescription> &description);
     void setRenderingIntent(RenderingIntent intent);
     void setPresentationHint(PresentationModeHint hint);
     void setScene(Scene *scene);
@@ -178,13 +204,15 @@ private:
     void updateBoundingRect();
     void updateItemToSceneTransform();
     void scheduleRepaintInternal(const QRegion &region);
-    void scheduleRepaintInternal(SceneDelegate *delegate, const QRegion &region);
+    void scheduleRepaintInternal(RenderView *delegate, const QRegion &region);
     void scheduleSceneRepaintInternal(const QRegion &region);
     void markSortedChildItemsDirty();
 
     bool computeEffectiveVisibility() const;
     void updateEffectiveVisibility();
-    void removeRepaints(SceneDelegate *delegate);
+    void removeRepaints(RenderView *delegate);
+
+    void scheduleMoveRepaint(Item *originallyMovedItem);
 
     Scene *m_scene = nullptr;
     QPointer<Item> m_parentItem;
@@ -195,14 +223,15 @@ private:
     QRectF m_boundingRect;
     QPointF m_position;
     QSizeF m_size = QSize(0, 0);
+    BorderRadius m_borderRadius;
     qreal m_opacity = 1;
     int m_z = 0;
     bool m_explicitVisible = true;
     bool m_effectiveVisible = true;
-    QMap<SceneDelegate *, QRegion> m_repaints;
+    QMap<RenderView *, QRegion> m_repaints;
     mutable std::optional<WindowQuadList> m_quads;
     mutable std::optional<QList<Item *>> m_sortedChildItems;
-    ColorDescription m_colorDescription = ColorDescription::sRGB;
+    std::shared_ptr<ColorDescription> m_colorDescription = ColorDescription::sRGB;
     RenderingIntent m_renderingIntent = RenderingIntent::Perceptual;
     PresentationModeHint m_presentationHint = PresentationModeHint::VSync;
     int m_effectCount = 0;

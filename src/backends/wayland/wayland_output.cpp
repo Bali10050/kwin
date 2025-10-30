@@ -15,15 +15,19 @@
 #include "core/renderloop_p.h"
 #include "wayland_backend.h"
 #include "wayland_display.h"
+#include "wayland_layer.h"
 
 #include <KWayland/Client/compositor.h>
 #include <KWayland/Client/pointer.h>
 #include <KWayland/Client/pointerconstraints.h>
+#include <KWayland/Client/seat.h>
 #include <KWayland/Client/surface.h>
 #include <KWayland/Client/xdgdecoration.h>
 
 #include "wayland-fractional-scale-v1-client-protocol.h"
+#include "wayland-keyboard-shortcuts-inhibit-unstable-v1-client-protocol.h"
 #include "wayland-presentation-time-client-protocol.h"
+#include "wayland-single-pixel-buffer-v1-client-protocol.h"
 #include "wayland-tearing-control-v1-client-protocol.h"
 #include "wayland-viewporter-client-protocol.h"
 #include "workspace.h"
@@ -33,6 +37,7 @@
 #include <QPainter>
 
 #include <cmath>
+#include <ranges>
 
 namespace KWin
 {
@@ -127,15 +132,14 @@ WaylandOutput::WaylandOutput(const QString &name, WaylandBackend *backend)
     , m_backend(backend)
     , m_cursor(std::make_unique<WaylandCursor>(backend))
 {
+    m_renderLoop->setMaxPendingFrameCount(2);
     if (KWayland::Client::XdgDecorationManager *manager = m_backend->display()->xdgDecorationManager()) {
         m_xdgDecoration.reset(manager->getToplevelDecoration(m_xdgShellSurface.get()));
         m_xdgDecoration->setMode(KWayland::Client::XdgDecoration::Mode::ServerSide);
     }
-
     Capabilities caps = Capability::Dpms;
-    if (auto manager = backend->display()->tearingControl()) {
+    if (backend->display()->tearingControl()) {
         caps |= Capability::Tearing;
-        m_tearingControl = wp_tearing_control_manager_v1_get_tearing_control(manager, *m_surface);
     }
     if (auto manager = backend->display()->colorManager()) {
         const bool supportsMinFeatures = manager->supportsFeature(WP_COLOR_MANAGER_V1_FEATURE_PARAMETRIC)
@@ -143,7 +147,6 @@ WaylandOutput::WaylandOutput(const QString &name, WaylandBackend *backend)
             && manager->supportsFeature(WP_COLOR_MANAGER_V1_FEATURE_SET_LUMINANCES)
             && manager->supportsTransferFunction(WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_GAMMA22);
         if (supportsMinFeatures) {
-            m_colorSurface = wp_color_manager_v1_get_surface(manager->object(), *m_surface);
             m_colorSurfaceFeedback = std::make_unique<ColorSurfaceFeedback>(wp_color_manager_v1_get_surface_feedback(manager->object(), *m_surface));
             connect(m_colorSurfaceFeedback.get(), &ColorSurfaceFeedback::preferredColorChanged, this, &WaylandOutput::updateColor);
         }
@@ -152,9 +155,7 @@ WaylandOutput::WaylandOutput(const QString &name, WaylandBackend *backend)
         m_fractionalScale = wp_fractional_scale_manager_v1_get_fractional_scale(manager, *m_surface);
         wp_fractional_scale_v1_add_listener(m_fractionalScale, &s_fractionalScaleListener, this);
     }
-    if (auto viewporter = backend->display()->viewporter()) {
-        m_viewport = wp_viewporter_get_viewport(viewporter, *m_surface);
-    }
+    m_viewport = wp_viewporter_get_viewport(backend->display()->viewporter(), *m_surface);
     setInformation(Information{
         .name = name,
         .model = name,
@@ -172,12 +173,6 @@ WaylandOutput::WaylandOutput(const QString &name, WaylandBackend *backend)
         applyConfigure(m_pendingConfigureSize, m_pendingConfigureSerial);
     });
 
-    connect(m_surface.get(), &KWayland::Client::Surface::frameRendered, this, [this]() {
-        Q_ASSERT(m_frame);
-        m_frame->presented(std::chrono::steady_clock::now().time_since_epoch(), PresentationMode::VSync);
-        m_frame.reset();
-    });
-
     updateWindowTitle();
 
     connect(m_xdgShellSurface.get(), &XdgShellSurface::configureRequested, this, &WaylandOutput::handleConfigure);
@@ -188,22 +183,11 @@ WaylandOutput::WaylandOutput(const QString &name, WaylandBackend *backend)
 
 WaylandOutput::~WaylandOutput()
 {
-    if (m_presentationFeedback) {
-        wp_presentation_feedback_destroy(m_presentationFeedback);
-        m_presentationFeedback = nullptr;
+    m_frames.clear();
+    if (m_shortcutInhibition) {
+        zwp_keyboard_shortcuts_inhibitor_v1_destroy(m_shortcutInhibition);
     }
-    if (m_tearingControl) {
-        wp_tearing_control_v1_destroy(m_tearingControl);
-        m_tearingControl = nullptr;
-    }
-    if (m_colorSurface) {
-        wp_color_management_surface_v1_destroy(m_colorSurface);
-        m_colorSurface = nullptr;
-    }
-    if (m_viewport) {
-        wp_viewport_destroy(m_viewport);
-        m_viewport = nullptr;
-    }
+    wp_viewport_destroy(m_viewport);
     m_xdgDecoration.reset();
     m_xdgShellSurface.reset();
     m_surface.reset();
@@ -212,28 +196,21 @@ WaylandOutput::~WaylandOutput()
 void WaylandOutput::updateColor()
 {
     const auto &preferred = m_colorSurfaceFeedback->preferredColor();
-    const auto tf = TransferFunction(TransferFunction::gamma22, preferred.transferFunction().minLuminance, preferred.transferFunction().maxLuminance);
+    const auto tf = TransferFunction(TransferFunction::gamma22, preferred->transferFunction().minLuminance, preferred->transferFunction().maxLuminance);
     State next = m_state;
-    next.colorDescription = ColorDescription{
-        preferred.containerColorimetry(),
+    next.colorDescription = std::make_shared<ColorDescription>(ColorDescription{
+        preferred->containerColorimetry(),
         tf,
-        preferred.referenceLuminance(),
-        preferred.minLuminance(),
-        preferred.maxAverageLuminance(),
-        preferred.maxHdrLuminance(),
-    };
+        preferred->referenceLuminance(),
+        preferred->minLuminance(),
+        preferred->maxAverageLuminance(),
+        preferred->maxHdrLuminance(),
+    });
     next.originalColorDescription = next.colorDescription;
+    next.blendingColor = next.colorDescription;
+    // we don't actually know this, but we have to assume *something*
+    next.layerBlendingColor = next.colorDescription;
     setState(next);
-    if (m_colorSurface) {
-        const auto imageDescription = m_backend->display()->colorManager()->createImageDescription(next.colorDescription);
-        wp_color_management_surface_v1_set_image_description(m_colorSurface, imageDescription, WP_COLOR_MANAGER_V1_RENDER_INTENT_PERCEPTUAL);
-        wp_image_description_v1_destroy(imageDescription);
-    }
-}
-
-void WaylandOutput::setPrimaryBuffer(wl_buffer *buffer)
-{
-    m_presentationBuffer = buffer;
 }
 
 static void handleDiscarded(void *data,
@@ -271,45 +248,103 @@ static constexpr struct wp_presentation_feedback_listener s_presentationListener
     .discarded = handleDiscarded,
 };
 
-bool WaylandOutput::present(const std::shared_ptr<OutputFrame> &frame)
+void WaylandOutput::handleFrame(void *data, wl_callback *callback, uint32_t time)
 {
-    if (!m_presentationBuffer) {
+    auto output = reinterpret_cast<WaylandOutput *>(data);
+    auto it = std::ranges::find_if(output->m_frames, [callback](const auto &frame) {
+        return frame.frameCallback == callback;
+    });
+    if (it != output->m_frames.end()) {
+        // don't use the "time" argument for this, as it's in an unspecified base.
+        it->frameCallbackTime = std::chrono::steady_clock::now();
+    }
+}
+
+const wl_callback_listener WaylandOutput::s_frameCallbackListener{
+    .done = &WaylandOutput::handleFrame,
+};
+
+bool WaylandOutput::testPresentation(const std::shared_ptr<OutputFrame> &frame)
+{
+    auto cursorLayers = Compositor::self()->backend()->compatibleOutputLayers(this) | std::views::filter([](OutputLayer *layer) {
+        return layer->type() == OutputLayerType::CursorOnly;
+    });
+    if (m_hasPointerLock && std::ranges::any_of(cursorLayers, &OutputLayer::isEnabled)) {
         return false;
     }
-    if (m_tearingControl) {
-        if (frame->presentationMode() == PresentationMode::Async) {
-            wp_tearing_control_v1_set_presentation_hint(m_tearingControl, WP_TEARING_CONTROL_V1_PRESENTATION_HINT_ASYNC);
-        } else {
-            wp_tearing_control_v1_set_presentation_hint(m_tearingControl, WP_TEARING_CONTROL_V1_PRESENTATION_HINT_VSYNC);
+    return true;
+}
+
+WaylandOutput::FrameData::FrameData(const std::shared_ptr<OutputFrame> &frame, struct wp_presentation_feedback *presentationFeedback, struct wl_callback *frameCallback)
+    : outputFrame(frame)
+    , presentationFeedback(presentationFeedback)
+    , frameCallback(frameCallback)
+{
+}
+
+WaylandOutput::FrameData::FrameData(FrameData &&move)
+    : outputFrame(std::move(move.outputFrame))
+    , presentationFeedback(std::exchange(move.presentationFeedback, nullptr))
+    , frameCallback(std::exchange(move.frameCallback, nullptr))
+    , frameCallbackTime(std::exchange(move.frameCallbackTime, std::nullopt))
+{
+}
+
+WaylandOutput::FrameData::~FrameData()
+{
+    if (presentationFeedback) {
+        wp_presentation_feedback_destroy(presentationFeedback);
+    }
+    if (frameCallback) {
+        wl_callback_destroy(frameCallback);
+    }
+}
+
+bool WaylandOutput::present(const QList<OutputLayer *> &layersToUpdate, const std::shared_ptr<OutputFrame> &frame)
+{
+    auto cursorLayers = layersToUpdate | std::views::filter([](OutputLayer *layer) {
+        return layer->type() == OutputLayerType::CursorOnly;
+    });
+    if (!cursorLayers.empty()) {
+        if (m_hasPointerLock && cursorLayers.front()->isEnabled()) {
+            return false;
         }
+        m_cursor->setEnabled(cursorLayers.front()->isEnabled());
+        // TODO also move the actual cursor image update here too...
+    }
+    if (!m_mapped) {
+        // we only ever want a black background
+        auto buffer = wp_single_pixel_buffer_manager_v1_create_u32_rgba_buffer(m_backend->display()->singlePixelManager(), 0, 0, 0, 0xFFFFFFFF);
+        m_surface->attachBuffer(buffer);
+        m_mapped = true;
+    }
+    wp_viewport_set_destination(m_viewport, geometry().width(), geometry().height());
+    m_surface->setScale(1);
+    // commit the subsurfaces before the main surface
+    for (OutputLayer *layer : layersToUpdate) {
+        // TODO maybe also make the cursor a WaylandLayer?
+        if (layer->type() != OutputLayerType::CursorOnly) {
+            static_cast<WaylandLayer *>(layer)->commit(frame->presentationMode());
+        }
+    }
+    if (m_backend->display()->tearingControl()) {
         m_renderLoop->setPresentationMode(frame->presentationMode());
     }
-    if (m_viewport) {
-        wp_viewport_set_destination(m_viewport, geometry().width(), geometry().height());
-    }
-    m_surface->attachBuffer(m_presentationBuffer);
-    m_surface->damage(frame->damage());
-    m_surface->setScale(1);
-    m_presentationBuffer = nullptr;
-    if (auto presentationTime = m_backend->display()->presentationTime()) {
-        m_presentationFeedback = wp_presentation_feedback(presentationTime, *m_surface);
-        wp_presentation_feedback_add_listener(m_presentationFeedback, &s_presentationListener, this);
-        m_surface->commit(KWayland::Client::Surface::CommitFlag::None);
-    } else {
-        m_surface->commit(KWayland::Client::Surface::CommitFlag::FrameCallback);
-    }
-    m_frame = frame;
-    Q_EMIT outputChange(frame->damage());
+    FrameData frameData{
+        frame,
+        wp_presentation_feedback(m_backend->display()->presentationTime(), *m_surface),
+        wl_surface_frame(*m_surface),
+    };
+    wp_presentation_feedback_add_listener(frameData.presentationFeedback, &s_presentationListener, this);
+    wl_callback_add_listener(frameData.frameCallback, &s_frameCallbackListener, this);
+    m_surface->commit(KWayland::Client::Surface::CommitFlag::None);
+    m_frames.push_back(std::move(frameData));
     return true;
 }
 
 void WaylandOutput::frameDiscarded()
 {
-    m_frame.reset();
-    if (m_presentationFeedback) {
-        wp_presentation_feedback_destroy(m_presentationFeedback);
-        m_presentationFeedback = nullptr;
-    }
+    m_frames.pop_front();
 }
 
 void WaylandOutput::framePresented(std::chrono::nanoseconds timestamp, uint32_t refreshRate)
@@ -323,12 +358,17 @@ void WaylandOutput::framePresented(std::chrono::nanoseconds timestamp, uint32_t 
         setState(next);
         m_renderLoop->setRefreshRate(m_refreshRate);
     }
-    m_frame->presented(timestamp, PresentationMode::VSync);
-    m_frame.reset();
-    if (m_presentationFeedback) {
-        wp_presentation_feedback_destroy(m_presentationFeedback);
-        m_presentationFeedback = nullptr;
+    const auto &frame = m_frames.front();
+    if (auto t = frame.frameCallbackTime) {
+        // NOTE that the frame callback gets signaled *after* the host compositor
+        // is done compositing the frame on the CPU side, not before!
+        // This is the best estimate we currently have for the commit deadline, but
+        // it should be replaced with something more accurate when possible.
+        const auto difference = timestamp - t->time_since_epoch();
+        m_renderLoop->setPresentationSafetyMargin(difference + std::chrono::milliseconds(1));
     }
+    frame.outputFrame->presented(timestamp, PresentationMode::VSync);
+    m_frames.pop_front();
 }
 
 void WaylandOutput::applyChanges(const OutputConfiguration &config)
@@ -376,16 +416,10 @@ RenderLoop *WaylandOutput::renderLoop() const
     return m_renderLoop.get();
 }
 
-bool WaylandOutput::updateCursorLayer(std::optional<std::chrono::nanoseconds> allowedVrrDelay)
+bool WaylandOutput::presentAsync(OutputLayer *layer, std::optional<std::chrono::nanoseconds> allowedVrrDelay)
 {
-    if (m_hasPointerLock) {
-        m_cursor->setEnabled(false);
-        return false;
-    } else {
-        m_cursor->setEnabled(Compositor::self()->backend()->cursorLayer(this)->isEnabled());
-        // the layer already takes care of updating the image
-        return true;
-    }
+    // the host compositor moves the cursor, there's nothing to do
+    return layer->type() == OutputLayerType::CursorOnly;
 }
 
 void WaylandOutput::init(const QSize &pixelSize, qreal scale, bool fullscreen)
@@ -489,8 +523,8 @@ void WaylandOutput::lockPointer(Pointer *pointer, bool lock)
         m_pointerLock.reset();
         m_hasPointerLock = false;
         if (surfaceWasLocked) {
+            inhibitShortcuts(false);
             updateWindowTitle();
-            updateCursorLayer(std::nullopt);
             Q_EMIT m_backend->pointerLockChanged(false);
         }
         return;
@@ -504,19 +538,47 @@ void WaylandOutput::lockPointer(Pointer *pointer, bool lock)
     }
     connect(m_pointerLock.get(), &LockedPointer::locked, this, [this]() {
         m_hasPointerLock = true;
+        inhibitShortcuts(true);
         updateWindowTitle();
-        updateCursorLayer(std::nullopt);
         Q_EMIT m_backend->pointerLockChanged(true);
     });
     connect(m_pointerLock.get(), &LockedPointer::unlocked, this, [this]() {
         m_pointerLock.reset();
+        inhibitShortcuts(false);
         m_hasPointerLock = false;
         updateWindowTitle();
-        updateCursorLayer(std::nullopt);
         Q_EMIT m_backend->pointerLockChanged(false);
     });
 }
 
+void WaylandOutput::inhibitShortcuts(bool inhibit)
+{
+    if (!inhibit) {
+        if (m_shortcutInhibition) {
+            zwp_keyboard_shortcuts_inhibitor_v1_destroy(m_shortcutInhibition);
+            m_shortcutInhibition = nullptr;
+        }
+        return;
+    }
+
+    auto *inhibitionManager = m_backend->display()->keyboardShortcutsInhibitManager();
+    if (!inhibitionManager) {
+        return;
+    }
+
+    Q_ASSERT(!m_shortcutInhibition);
+    m_shortcutInhibition = zwp_keyboard_shortcuts_inhibit_manager_v1_inhibit_shortcuts(inhibitionManager, *m_surface, *(m_backend->display()->seat()));
+}
+
+void WaylandOutput::setOutputLayers(std::vector<std::unique_ptr<OutputLayer>> &&layers)
+{
+    m_layers = std::move(layers);
+}
+
+QList<OutputLayer *> WaylandOutput::outputLayers() const
+{
+    return m_layers | std::views::transform(&std::unique_ptr<OutputLayer>::get) | std::ranges::to<QList>();
+}
 }
 }
 

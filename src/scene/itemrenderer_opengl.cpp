@@ -14,6 +14,7 @@
 #include "opengl/eglnativefence.h"
 #include "scene/decorationitem.h"
 #include "scene/imageitem.h"
+#include "scene/outlinedborderitem.h"
 #include "scene/shadowitem.h"
 #include "scene/surfaceitem.h"
 #include "scene/workspacescene.h"
@@ -120,8 +121,15 @@ static RenderGeometry clipQuads(const Item *item, const ItemRendererOpenGL::Rend
     return geometry;
 }
 
-void ItemRendererOpenGL::createRenderNode(Item *item, RenderContext *context)
+void ItemRendererOpenGL::createRenderNode(Item *item, RenderContext *context, const std::function<bool(Item *)> &filter, const std::function<bool(Item *)> &holeFilter)
 {
+    bool hole = false;
+    if (filter && filter(item)) {
+        if (!holeFilter || !holeFilter(item)) {
+            return;
+        }
+        hole = true;
+    }
     const QList<Item *> sortedChildItems = item->sortedChildItems();
 
     const auto logicalPosition = QVector2D(item->position().x(), item->position().y());
@@ -146,8 +154,23 @@ void ItemRendererOpenGL::createRenderNode(Item *item, RenderContext *context)
             break;
         }
         if (childItem->explicitVisible()) {
-            createRenderNode(childItem, context);
+            createRenderNode(childItem, context, filter, holeFilter);
         }
+    }
+
+    if (const BorderRadius radius = item->borderRadius(); !radius.isNull()) {
+        const QRectF nativeRect = snapToPixelGridF(scaledRect(item->rect(), context->renderTargetScale));
+        const BorderRadius nativeRadius = radius.scaled(context->renderTargetScale).rounded();
+        context->cornerStack.push({
+            .box = nativeRect,
+            .radius = nativeRadius,
+        });
+    } else if (!context->cornerStack.isEmpty()) {
+        const auto &top = std::as_const(context->cornerStack).top();
+        context->cornerStack.push({
+            .box = matrix.inverted().mapRect(top.box),
+            .radius = top.radius,
+        });
     }
 
     item->preprocess();
@@ -157,59 +180,112 @@ void ItemRendererOpenGL::createRenderNode(Item *item, RenderContext *context)
     if (auto shadowItem = qobject_cast<ShadowItem *>(item)) {
         if (!geometry.isEmpty()) {
             OpenGLShadowTextureProvider *textureProvider = static_cast<OpenGLShadowTextureProvider *>(shadowItem->textureProvider());
-            context->renderNodes.append(RenderNode{
-                .texture = textureProvider->shadowTexture(),
-                .geometry = geometry,
-                .transformMatrix = context->transformStack.top(),
-                .opacity = context->opacityStack.top(),
-                .hasAlpha = true,
-                .colorDescription = item->colorDescription(),
-                .renderingIntent = item->renderingIntent(),
-                .bufferReleasePoint = nullptr,
-            });
+            if (textureProvider->shadowTexture()) {
+                RenderNode &renderNode = context->renderNodes.emplace_back(RenderNode{
+                    .traits = ShaderTrait::MapTexture,
+                    .textures = {textureProvider->shadowTexture()},
+                    .geometry = geometry,
+                    .transformMatrix = context->transformStack.top(),
+                    .opacity = context->opacityStack.top(),
+                    .hasAlpha = true,
+                    .colorDescription = item->colorDescription(),
+                    .renderingIntent = item->renderingIntent(),
+                    .bufferReleasePoint = nullptr,
+                    .paintHole = hole,
+                });
+                renderNode.geometry.postProcessTextureCoordinates(textureProvider->shadowTexture()->matrix(UnnormalizedCoordinates));
+            }
         }
     } else if (auto decorationItem = qobject_cast<DecorationItem *>(item)) {
         if (!geometry.isEmpty()) {
             auto renderer = static_cast<const SceneOpenGLDecorationRenderer *>(decorationItem->renderer());
-            context->renderNodes.append(RenderNode{
-                .texture = renderer->texture(),
-                .geometry = geometry,
-                .transformMatrix = context->transformStack.top(),
-                .opacity = context->opacityStack.top(),
-                .hasAlpha = true,
-                .colorDescription = item->colorDescription(),
-                .renderingIntent = item->renderingIntent(),
-                .bufferReleasePoint = nullptr,
-            });
-        }
-    } else if (auto surfaceItem = qobject_cast<SurfaceItem *>(item)) {
-        SurfacePixmap *pixmap = surfaceItem->pixmap();
-        if (pixmap) {
-            if (!geometry.isEmpty()) {
-                OpenGLSurfaceTexture *surfaceTexture = static_cast<OpenGLSurfaceTexture *>(pixmap->texture());
-                context->renderNodes.append(RenderNode{
-                    .texture = surfaceTexture->texture(),
+            if (renderer->texture()) {
+                RenderNode &renderNode = context->renderNodes.emplace_back(RenderNode{
+                    .traits = ShaderTrait::MapTexture,
+                    .textures = {renderer->texture()},
                     .geometry = geometry,
                     .transformMatrix = context->transformStack.top(),
                     .opacity = context->opacityStack.top(),
-                    .hasAlpha = pixmap->hasAlphaChannel(),
+                    .hasAlpha = true,
+                    .colorDescription = item->colorDescription(),
+                    .renderingIntent = item->renderingIntent(),
+                    .bufferReleasePoint = nullptr,
+                    .paintHole = hole,
+                });
+                renderNode.geometry.postProcessTextureCoordinates(renderer->texture()->matrix(UnnormalizedCoordinates));
+            }
+        }
+    } else if (auto surfaceItem = qobject_cast<SurfaceItem *>(item)) {
+        auto texture = static_cast<OpenGLSurfaceTexture *>(surfaceItem->texture());
+        if (texture && texture->isValid()) {
+            if (!geometry.isEmpty()) {
+                RenderNode &renderNode = context->renderNodes.emplace_back(RenderNode{
+                    .traits = texture->texture().planes.count() == 1 ? ShaderTrait::MapTexture : ShaderTrait::MapYUVTexture,
+                    .textures = texture->texture().toVarLengthArray(),
+                    .geometry = geometry,
+                    .transformMatrix = context->transformStack.top(),
+                    .opacity = context->opacityStack.top(),
+                    .hasAlpha = surfaceItem->hasAlphaChannel(),
                     .colorDescription = item->colorDescription(),
                     .renderingIntent = item->renderingIntent(),
                     .bufferReleasePoint = surfaceItem->bufferReleasePoint(),
+                    .paintHole = hole,
                 });
+                renderNode.geometry.postProcessTextureCoordinates(texture->texture().planes.at(0)->matrix(UnnormalizedCoordinates));
+
+                if (!context->cornerStack.isEmpty()) {
+                    const auto &top = context->cornerStack.top();
+
+                    renderNode.traits |= ShaderTrait::RoundedCorners;
+                    renderNode.hasAlpha = true;
+                    renderNode.box = QVector4D(top.box.x() + top.box.width() * 0.5,
+                                               top.box.y() + top.box.height() * 0.5,
+                                               top.box.width() * 0.5,
+                                               top.box.height() * 0.5),
+                    renderNode.borderRadius = top.radius.toVector();
+                }
             }
         }
     } else if (auto imageItem = qobject_cast<ImageItemOpenGL *>(item)) {
         if (!geometry.isEmpty()) {
+            if (imageItem->texture()) {
+                RenderNode &renderNode = context->renderNodes.emplace_back(RenderNode{
+                    .traits = ShaderTrait::MapTexture,
+                    .textures = {imageItem->texture()},
+                    .geometry = geometry,
+                    .transformMatrix = context->transformStack.top(),
+                    .opacity = context->opacityStack.top(),
+                    .hasAlpha = imageItem->image().hasAlphaChannel(),
+                    .colorDescription = item->colorDescription(),
+                    .renderingIntent = item->renderingIntent(),
+                    .bufferReleasePoint = nullptr,
+                    .paintHole = hole,
+                });
+                renderNode.geometry.postProcessTextureCoordinates(imageItem->texture()->matrix(UnnormalizedCoordinates));
+            }
+        }
+    } else if (auto borderItem = qobject_cast<OutlinedBorderItem *>(item)) {
+        if (!geometry.isEmpty()) {
+            const BorderOutline outline = borderItem->outline();
+            const int thickness = std::round(outline.thickness() * context->renderTargetScale);
+            const QRectF outerRect = snapToPixelGridF(scaledRect(borderItem->rect(), context->renderTargetScale));
+            const QRectF innerRect = outerRect.adjusted(thickness, thickness, -thickness, -thickness);
             context->renderNodes.append(RenderNode{
-                .texture = imageItem->texture(),
+                .traits = ShaderTrait::Border,
                 .geometry = geometry,
                 .transformMatrix = context->transformStack.top(),
                 .opacity = context->opacityStack.top(),
-                .hasAlpha = imageItem->image().hasAlphaChannel(),
-                .colorDescription = item->colorDescription(),
-                .renderingIntent = item->renderingIntent(),
-                .bufferReleasePoint = nullptr,
+                .hasAlpha = true,
+                .colorDescription = borderItem->colorDescription(),
+                .renderingIntent = borderItem->renderingIntent(),
+                .box = QVector4D(innerRect.x() + innerRect.width() * 0.5,
+                                 innerRect.y() + innerRect.height() * 0.5,
+                                 innerRect.width() * 0.5,
+                                 innerRect.height() * 0.5),
+                .borderRadius = outline.radius().scaled(context->renderTargetScale).rounded().toVector(),
+                .borderThickness = thickness,
+                .borderColor = outline.color(),
+                .paintHole = hole,
             });
         }
     }
@@ -219,12 +295,15 @@ void ItemRendererOpenGL::createRenderNode(Item *item, RenderContext *context)
             continue;
         }
         if (childItem->explicitVisible()) {
-            createRenderNode(childItem, context);
+            createRenderNode(childItem, context, filter, holeFilter);
         }
     }
 
     context->transformStack.pop();
     context->opacityStack.pop();
+    if (!context->cornerStack.isEmpty()) {
+        context->cornerStack.pop();
+    }
 }
 
 void ItemRendererOpenGL::renderBackground(const RenderTarget &renderTarget, const RenderViewport &viewport, const QRegion &region)
@@ -247,7 +326,7 @@ void ItemRendererOpenGL::renderBackground(const RenderTarget &renderTarget, cons
     }
 }
 
-void ItemRendererOpenGL::renderItem(const RenderTarget &renderTarget, const RenderViewport &viewport, Item *item, int mask, const QRegion &region, const WindowPaintData &data)
+void ItemRendererOpenGL::renderItem(const RenderTarget &renderTarget, const RenderViewport &viewport, Item *item, int mask, const QRegion &region, const WindowPaintData &data, const std::function<bool(Item *)> &filter, const std::function<bool(Item *)> &holeFilter)
 {
     if (region.isEmpty()) {
         return;
@@ -264,7 +343,7 @@ void ItemRendererOpenGL::renderItem(const RenderTarget &renderTarget, const Rend
     renderContext.transformStack.push(QMatrix4x4());
     renderContext.opacityStack.push(data.opacity());
 
-    createRenderNode(item, &renderContext);
+    createRenderNode(item, &renderContext, filter, holeFilter);
 
     int totalVertexCount = 0;
     for (const RenderNode &node : std::as_const(renderContext.renderNodes)) {
@@ -272,14 +351,6 @@ void ItemRendererOpenGL::renderItem(const RenderTarget &renderTarget, const Rend
     }
     if (totalVertexCount == 0) {
         return;
-    }
-
-    ShaderTraits baseShaderTraits;
-    if (data.brightness() != 1.0) {
-        baseShaderTraits |= ShaderTrait::Modulate;
-    }
-    if (data.saturation() != 1.0) {
-        baseShaderTraits |= ShaderTrait::AdjustSaturation;
     }
 
     GLVertexBuffer *vbo = GLVertexBuffer::streamingBuffer();
@@ -293,23 +364,8 @@ void ItemRendererOpenGL::renderItem(const RenderTarget &renderTarget, const Rend
 
     for (int i = 0, v = 0; i < renderContext.renderNodes.count(); i++) {
         RenderNode &renderNode = renderContext.renderNodes[i];
-        if (renderNode.geometry.isEmpty()
-            || (std::holds_alternative<GLTexture *>(renderNode.texture) && !std::get<GLTexture *>(renderNode.texture))
-            || (std::holds_alternative<OpenGLSurfaceContents>(renderNode.texture) && !std::get<OpenGLSurfaceContents>(renderNode.texture).isValid())) {
-            continue;
-        }
-
         renderNode.firstVertex = v;
         renderNode.vertexCount = renderNode.geometry.count();
-
-        GLTexture *texture = nullptr;
-        if (std::holds_alternative<GLTexture *>(renderNode.texture)) {
-            texture = std::get<GLTexture *>(renderNode.texture);
-        } else {
-            texture = std::get<OpenGLSurfaceContents>(renderNode.texture).planes.constFirst().get();
-        }
-        renderNode.geometry.postProcessTextureCoordinates(texture->matrix(UnnormalizedCoordinates));
-
         renderNode.geometry.copy(map->subspan(v));
         v += renderNode.geometry.count();
     }
@@ -334,30 +390,33 @@ void ItemRendererOpenGL::renderItem(const RenderTarget &renderTarget, const Rend
     GLShader *shader = nullptr;
     for (int i = 0; i < renderContext.renderNodes.count(); i++) {
         const RenderNode &renderNode = renderContext.renderNodes[i];
-        if (renderNode.vertexCount == 0) {
-            continue;
-        }
 
-        setBlendEnabled(renderNode.hasAlpha || renderNode.opacity < 1.0);
-
-        ShaderTraits traits = baseShaderTraits;
-        if (renderNode.opacity != 1.0) {
+        ShaderTraits traits = renderNode.traits;
+        if (renderNode.opacity != 1.0 || data.brightness() != 1.0) {
             traits |= ShaderTrait::Modulate;
         }
-        const auto colorTransformation = ColorPipeline::create(renderNode.colorDescription, renderTarget.colorDescription(), item->renderingIntent());
-        if (!colorTransformation.isIdentity()) {
-            traits |= ShaderTrait::TransformColorspace;
+        if (data.saturation() != 1.0) {
+            traits |= ShaderTrait::AdjustSaturation;
         }
-        if (std::holds_alternative<GLTexture *>(renderNode.texture)) {
-            traits |= ShaderTrait::MapTexture;
+        if (data.brightness() != 1.0 || data.saturation() != 1.0) {
+            // make sure that brightness and saturation adjustments are always applied in linear space
+            traits |= ShaderTrait::TransformColorspace;
         } else {
-            const auto contents = std::get<OpenGLSurfaceContents>(renderNode.texture);
-            if (contents.planes.size() == 1) {
-                traits |= ShaderTrait::MapTexture;
-            } else {
-                traits |= ShaderTrait::MapYUVTexture;
+            const auto colorTransformation = ColorPipeline::create(renderNode.colorDescription, renderTarget.colorDescription(), renderNode.renderingIntent);
+            if (!colorTransformation.isIdentity()) {
+                traits |= ShaderTrait::TransformColorspace;
             }
         }
+
+        if (renderNode.paintHole) {
+            traits = (traits & ShaderTrait::RoundedCorners) | ShaderTrait::UniformColor;
+            glBlendFunc(GL_ONE_MINUS_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            setBlendEnabled(true);
+        } else {
+            glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+            setBlendEnabled(renderNode.hasAlpha || renderNode.opacity < 1.0);
+        }
+
         if (!shader || traits != lastTraits) {
             lastTraits = traits;
             if (shader) {
@@ -365,7 +424,7 @@ void ItemRendererOpenGL::renderItem(const RenderTarget &renderTarget, const Rend
             }
             shader = ShaderManager::instance()->pushShader(traits);
             if (traits & ShaderTrait::AdjustSaturation) {
-                const auto toXYZ = renderTarget.colorDescription().containerColorimetry().toXYZ();
+                const auto toXYZ = renderTarget.colorDescription()->containerColorimetry().toXYZ();
                 shader->setUniform(GLShader::FloatUniform::Saturation, data.saturation());
                 shader->setUniform(GLShader::Vec3Uniform::PrimaryBrightness, QVector3D(toXYZ(1, 0), toXYZ(1, 1), toXYZ(1, 2)));
             }
@@ -385,42 +444,42 @@ void ItemRendererOpenGL::renderItem(const RenderTarget &renderTarget, const Rend
             shader->setColorspaceUniforms(renderNode.colorDescription, renderTarget.colorDescription(), renderNode.renderingIntent);
         }
         if (traits & ShaderTrait::MapYUVTexture) {
-            shader->setUniform(GLShader::Mat4Uniform::YuvToRgb, renderNode.colorDescription.yuvMatrix());
+            shader->setUniform(GLShader::Mat4Uniform::YuvToRgb, renderNode.colorDescription->yuvMatrix());
+        }
+        if (traits & ShaderTrait::RoundedCorners) {
+            shader->setUniform(GLShader::Vec4Uniform::Box, renderNode.box);
+            shader->setUniform(GLShader::Vec4Uniform::CornerRadius, renderNode.borderRadius);
+        }
+        if (traits & ShaderTrait::Border) {
+            shader->setUniform(GLShader::Vec4Uniform::Box, renderNode.box);
+            shader->setUniform(GLShader::Vec4Uniform::CornerRadius, renderNode.borderRadius);
+            shader->setUniform(GLShader::IntUniform::Thickness, renderNode.borderThickness);
+            shader->setUniform(GLShader::ColorUniform::Color, renderNode.borderColor);
+        }
+        if (renderNode.paintHole) {
+            shader->setUniform(GLShader::ColorUniform::Color, QColor(0, 0, 0, 255));
         }
 
-        if (std::holds_alternative<GLTexture *>(renderNode.texture)) {
-            const auto texture = std::get<GLTexture *>(renderNode.texture);
-            glActiveTexture(GL_TEXTURE0);
-            texture->bind();
-        } else {
-            const auto contents = std::get<OpenGLSurfaceContents>(renderNode.texture);
-            for (int plane = 0; plane < contents.planes.count(); ++plane) {
-                glActiveTexture(GL_TEXTURE0 + plane);
-                contents.planes[plane]->bind();
-            }
+        for (int i = 0; i < renderNode.textures.count() && !renderNode.paintHole; ++i) {
+            glActiveTexture(GL_TEXTURE0 + i);
+            renderNode.textures[i]->bind();
         }
 
         vbo->draw(scissorRegion, GL_TRIANGLES, renderNode.firstVertex,
                   renderNode.vertexCount, renderContext.hardwareClipping);
 
-        if (std::holds_alternative<GLTexture *>(renderNode.texture)) {
-            auto texture = std::get<GLTexture *>(renderNode.texture);
-            glActiveTexture(GL_TEXTURE0);
-            texture->unbind();
-        } else {
-            const auto contents = std::get<OpenGLSurfaceContents>(renderNode.texture);
-            for (int plane = 0; plane < contents.planes.count(); ++plane) {
-                glActiveTexture(GL_TEXTURE0 + plane);
-                contents.planes[plane]->unbind();
-            }
+        for (int i = 0; i < renderNode.textures.count() && !renderNode.paintHole; ++i) {
+            glActiveTexture(GL_TEXTURE0 + i);
+            renderNode.textures[i]->unbind();
         }
+
         if (renderNode.bufferReleasePoint) {
             m_releasePoints.insert(renderNode.bufferReleasePoint);
         }
     }
     if (shader) {
+        // some other code assumes texture 0 is active
         glActiveTexture(GL_TEXTURE0);
-        shader->setUniform("converter", 0);
         ShaderManager::instance()->popShader();
     }
 
@@ -460,19 +519,12 @@ void ItemRendererOpenGL::visualizeFractional(const RenderViewport &viewport, con
 
     for (int i = 0; i < renderContext.renderNodes.count(); i++) {
         const RenderNode &renderNode = renderContext.renderNodes[i];
-        if (renderNode.vertexCount == 0) {
-            continue;
-        }
 
         setBlendEnabled(true);
 
         QVector2D size;
-        if (std::holds_alternative<GLTexture *>(renderNode.texture)) {
-            auto texture = std::get<GLTexture *>(renderNode.texture);
-            size = QVector2D(texture->width(), texture->height());
-        } else {
-            auto texture = std::get<OpenGLSurfaceContents>(renderNode.texture).planes.constFirst().get();
-            size = QVector2D(texture->width(), texture->height());
+        if (!renderNode.textures.isEmpty()) {
+            size = QVector2D(renderNode.textures[0]->width(), renderNode.textures[0]->height());
         }
 
         m_debug.fractionalShader->setUniform("geometrySize", size);
