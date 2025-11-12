@@ -15,16 +15,13 @@
 #include "selection_source.h"
 
 #include "atoms.h"
-#include "wayland/compositor.h"
-#include "wayland/datasource.h"
 #include "wayland/seat.h"
+#include "wayland/surface.h"
 #include "wayland_server.h"
 #include "window.h"
 #include "workspace.h"
 #include "xwayland.h"
 #include "xwldrophandler.h"
-
-#include <QMouseEvent>
 
 #include <xcb/xcb.h>
 
@@ -52,9 +49,10 @@ Dnd::Dnd(xcb_atom_t atom, QObject *parent)
     xcb_connection_t *xcbConn = kwinApp()->x11Connection();
 
     const uint32_t dndValues[] = {XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY | XCB_EVENT_MASK_PROPERTY_CHANGE};
+    m_window = xcb_generate_id(kwinApp()->x11Connection());
     xcb_create_window(xcbConn,
                       XCB_COPY_FROM_PARENT,
-                      window(),
+                      m_window,
                       kwinApp()->x11RootWindow(),
                       0, 0,
                       8192, 8192, // TODO: get current screen size and connect to changes
@@ -71,7 +69,6 @@ Dnd::Dnd(xcb_atom_t atom, QObject *parent)
                         atoms->xdnd_aware,
                         XCB_ATOM_ATOM,
                         32, 1, &s_version);
-    xcb_flush(xcbConn);
 
     connect(waylandServer()->seat(), &SeatInterface::dragStarted, this, &Dnd::startDrag);
     connect(waylandServer()->seat(), &SeatInterface::dragEnded, this, &Dnd::endDrag);
@@ -141,7 +138,6 @@ bool Dnd::dragMoveFilter(Window *target, const QPointF &position)
 
 void Dnd::startDrag()
 {
-    // There can only ever be one Wl native drag at the same time.
     Q_ASSERT(!m_currentDrag);
 
     auto dragSource = waylandServer()->seat()->dragSource();
@@ -175,9 +171,6 @@ void Dnd::clearOldDrag(Drag *drag)
     m_oldDrags.removeOne(drag);
     delete drag;
 }
-
-using DnDAction = DataDeviceManagerInterface::DnDAction;
-using DnDActions = DataDeviceManagerInterface::DnDActions;
 
 DnDAction Dnd::atomToClientAction(xcb_atom_t atom)
 {

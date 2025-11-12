@@ -84,7 +84,7 @@ void WlSource::sendTargets(xcb_selection_request_event_t *event)
 
 void WlSource::sendTimestamp(xcb_selection_request_event_t *event)
 {
-    const xcb_timestamp_t time = timestamp();
+    const xcb_timestamp_t time = selection()->timestamp();
     xcb_change_property(kwinApp()->x11Connection(),
                         XCB_PROP_MODE_REPLACE,
                         event->requestor,
@@ -134,11 +134,10 @@ bool WlSource::checkStartTransfer(xcb_selection_request_event_t *event)
     return true;
 }
 
-X11Source::X11Source(Selection *selection, xcb_xfixes_selection_notify_event_t *event)
+X11Source::X11Source(Selection *selection)
     : SelectionSource(selection)
     , m_dataSource(std::make_unique<XwlDataSource>())
 {
-    setTimestamp(event->timestamp);
 }
 
 X11Source::~X11Source()
@@ -147,15 +146,13 @@ X11Source::~X11Source()
 
 void X11Source::getTargets()
 {
-    xcb_connection_t *xcbConn = kwinApp()->x11Connection();
     /* will lead to a selection request event for the new owner */
-    xcb_convert_selection(xcbConn,
+    xcb_convert_selection(kwinApp()->x11Connection(),
                           window(),
                           selection()->atom(),
                           atoms->targets,
                           atoms->wl_selection,
-                          timestamp());
-    xcb_flush(xcbConn);
+                          selection()->timestamp());
 }
 
 static bool isSpecialSelectionTarget(xcb_atom_t atom)
@@ -165,7 +162,6 @@ static bool isSpecialSelectionTarget(xcb_atom_t atom)
 
 void X11Source::handleTargets()
 {
-    // receive targets
     xcb_connection_t *xcbConn = kwinApp()->x11Connection();
     xcb_get_property_cookie_t cookie = xcb_get_property(xcbConn,
                                                         1,

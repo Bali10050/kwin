@@ -334,7 +334,6 @@ bool X11Window::track(xcb_window_t w)
     m_frameGeometry = Xcb::fromXNative(geo.rect());
     m_clientGeometry = Xcb::fromXNative(geo.rect());
     checkOutput();
-    m_visual = attr->visual;
     bit_depth = geo->depth;
     info = new NETWinInfo(kwinApp()->x11Connection(), w, kwinApp()->x11RootWindow(),
                           NET::WMWindowType,
@@ -358,6 +357,8 @@ bool X11Window::track(xcb_window_t w)
 
 bool X11Window::manage(xcb_window_t w, bool isMapped)
 {
+    Q_ASSERT(m_client == XCB_WINDOW_NONE);
+
     StackingUpdatesBlocker stacking_blocker(workspace());
 
     Xcb::WindowAttributes attr(w);
@@ -369,9 +370,10 @@ bool X11Window::manage(xcb_window_t w, bool isMapped)
     // From this place on, manage() must not return false
     blockGeometryUpdates();
 
-    embedClient(w, attr->visual, attr->colormap, windowGeometry.rect(), windowGeometry->depth);
+    m_client.reset(w, false, windowGeometry.rect());
+    m_client.setBorderWidth(0);
+    m_client.selectInput(XCB_EVENT_MASK_FOCUS_CHANGE | XCB_EVENT_MASK_PROPERTY_CHANGE);
 
-    m_visual = attr->visual;
     bit_depth = windowGeometry->depth;
 
     // SELI TODO: Order all these things in some sane manner
@@ -934,16 +936,6 @@ bool X11Window::manage(xcb_window_t w, bool isMapped)
 
     connect(kwinApp(), &Application::xwaylandScaleChanged, this, &X11Window::handleXwaylandScaleChanged);
     return true;
-}
-
-// Called only from manage()
-void X11Window::embedClient(xcb_window_t w, xcb_visualid_t visualid, xcb_colormap_t colormap, const QRect &nativeGeometry, uint8_t depth)
-{
-    Q_ASSERT(m_client == XCB_WINDOW_NONE);
-
-    m_client.reset(w, false, nativeGeometry);
-    m_client.setBorderWidth(0);
-    m_client.selectInput(XCB_EVENT_MASK_FOCUS_CHANGE | XCB_EVENT_MASK_PROPERTY_CHANGE);
 }
 
 void X11Window::updateDecoration(bool check_workspace_pos, bool force)

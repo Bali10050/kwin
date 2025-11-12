@@ -31,12 +31,11 @@ namespace Xwl
 Primary::Primary(xcb_atom_t atom, QObject *parent)
     : Selection(atom, parent)
 {
-    xcb_connection_t *xcbConn = kwinApp()->x11Connection();
-
     const uint32_t clipboardValues[] = {XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY | XCB_EVENT_MASK_PROPERTY_CHANGE};
-    xcb_create_window(xcbConn,
+    m_window = xcb_generate_id(kwinApp()->x11Connection());
+    xcb_create_window(kwinApp()->x11Connection(),
                       XCB_COPY_FROM_PARENT,
-                      window(),
+                      m_window,
                       kwinApp()->x11RootWindow(),
                       0, 0,
                       10, 10,
@@ -46,7 +45,6 @@ Primary::Primary(xcb_atom_t atom, QObject *parent)
                       XCB_CW_EVENT_MASK,
                       clipboardValues);
     registerXfixes();
-    xcb_flush(xcbConn);
 
     connect(waylandServer()->seat(), &SeatInterface::primarySelectionChanged, this, &Primary::onSelectionChanged);
     connect(workspace(), &Workspace::windowActivated, this, &Primary::onActiveWindowChanged);

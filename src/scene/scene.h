@@ -46,7 +46,7 @@ public:
     virtual void frame(OutputFrame *frame) = 0;
     virtual void prePaint() = 0;
     virtual QRegion collectDamage() = 0;
-    virtual void paint(const RenderTarget &renderTarget, const QRegion &region) = 0;
+    virtual void paint(const RenderTarget &renderTarget, const QRegion &logicalRegion) = 0;
     virtual void postPaint() = 0;
     virtual bool shouldRenderItem(Item *item) const;
     virtual bool shouldRenderHole(Item *item) const;
@@ -55,7 +55,7 @@ public:
     /**
      * add a repaint in layer-local logical coordinates
      */
-    void addRepaint(const QRegion &region);
+    void addRepaint(const QRegion &logicalRegion);
     void scheduleRepaint(Item *item);
     /**
      * @returns true if the layer can be moved with the Item
@@ -64,6 +64,17 @@ public:
     virtual bool canSkipMoveRepaint(Item *item);
 
     virtual void setExclusive(bool enable);
+
+    QRectF mapToDeviceCoordinates(const QRectF &logicalGeometry) const;
+    QRect mapToDeviceCoordinatesAligned(const QRect &logicalGeometry) const;
+    QRect mapToDeviceCoordinatesAligned(const QRectF &logicalGeometry) const;
+    QRect mapToDeviceCoordinatesContained(const QRect &logicalGeometry) const;
+    QRegion mapToDeviceCoordinatesAligned(const QRegion &logicalGeometry) const;
+    QRegion mapToDeviceCoordinatesContained(const QRegion &logicalGeometry) const;
+
+    QRectF mapFromDeviceCoordinates(const QRectF &deviceGeometry) const;
+    QRect mapFromDeviceCoordinatesAligned(const QRect &deviceGeometry) const;
+    QRegion mapFromDeviceCoordinatesAligned(const QRegion &deviceGeometry) const;
 
 protected:
     Output *m_output = nullptr;
@@ -88,7 +99,7 @@ public:
     void frame(OutputFrame *frame) override;
     void prePaint() override;
     QRegion collectDamage() override;
-    void paint(const RenderTarget &renderTarget, const QRegion &region) override;
+    void paint(const RenderTarget &renderTarget, const QRegion &logicalRegion) override;
     void postPaint() override;
     double desiredHdrHeadroom() const override;
 
@@ -126,7 +137,7 @@ public:
     void prePaint() override;
     QRegion collectDamage() override;
     void postPaint() override;
-    void paint(const RenderTarget &renderTarget, const QRegion &region) override;
+    void paint(const RenderTarget &renderTarget, const QRegion &logicalRegion) override;
     bool shouldRenderItem(Item *item) const override;
     void setExclusive(bool enable) override;
     void setUnderlay(bool underlay);
@@ -156,7 +167,7 @@ public:
     bool isVisible() const override;
     QList<SurfaceItem *> scanoutCandidates(ssize_t maxCount) const override;
     QRegion collectDamage() override;
-    void paint(const RenderTarget &renderTarget, const QRegion &region) override;
+    void paint(const RenderTarget &renderTarget, const QRegion &logicalRegion) override;
     bool shouldRenderItem(Item *item) const override;
     void setExclusive(bool enable) override;
     bool needsRepaint() override;
@@ -193,9 +204,9 @@ public:
 
     ItemRenderer *renderer() const;
 
-    void addRepaint(const QRegion &region);
-    void addRepaint(RenderView *delegate, const QRegion &region);
-    void addRepaint(int x, int y, int width, int height);
+    void addLogicalRepaint(const QRegion &logicalRegion);
+    void addLogicalRepaint(RenderView *delegate, const QRegion &logicalRegion);
+    void addLogicalRepaint(int x, int y, int width, int height);
     void addRepaintFull();
     virtual QRegion damage() const;
 
@@ -215,7 +226,7 @@ public:
     virtual OverlayCandidates overlayCandidates(ssize_t maxTotalCount, ssize_t maxOverlayCount, ssize_t maxUnderlayCount) const = 0;
     virtual void prePaint(SceneView *delegate) = 0;
     virtual QRegion collectDamage() = 0;
-    virtual void paint(const RenderTarget &renderTarget, const QRegion &region) = 0;
+    virtual void paint(const RenderTarget &renderTarget, const QRegion &deviceRegion) = 0;
     virtual void postPaint() = 0;
     virtual void frame(SceneView *delegate, OutputFrame *frame);
     virtual double desiredHdrHeadroom() const;

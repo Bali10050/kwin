@@ -92,6 +92,11 @@ public:
     QPoint map(const QPoint &point, const QSize &bounds) const;
 
     /**
+     * Applies the output transform to the given @a region
+     */
+    QRegion map(const QRegion &region, const QSize &bounds) const;
+
+    /**
      * Returns an output transform that is equivalent to applying this transform and @a other
      * transform sequentially.
      */
@@ -169,6 +174,7 @@ public:
         DdcCi = 1 << 11,
         MaxBitsPerColor = 1 << 12,
         Edr = 1 << 13,
+        SharpnessControl = 1 << 14,
     };
     Q_DECLARE_FLAGS(Capabilities, Capability)
 
@@ -413,6 +419,7 @@ public:
     std::optional<uint32_t> automaticMaxBitsPerColorLimit() const;
     EdrPolicy edrPolicy() const;
     std::optional<uint32_t> minVrrRefreshRateHz() const;
+    double sharpnessSetting() const;
 
     virtual void setAutoRotateAvailable(bool isAvailable);
 
@@ -515,6 +522,7 @@ Q_SIGNALS:
     void allowDdcCiChanged();
     void maxBitsPerColorChanged();
     void edrPolicyChanged();
+    void sharpnessChanged();
 
 protected:
     struct Information
@@ -589,6 +597,7 @@ protected:
         uint32_t maxBitsPerColor = 0;
         std::optional<uint32_t> automaticMaxBitsPerColorLimit;
         EdrPolicy edrPolicy = EdrPolicy::Always;
+        double sharpnessSetting = 0;
     };
 
     void setInformation(const Information &information);

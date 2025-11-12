@@ -72,8 +72,6 @@ public:
     void unblockGeometryUpdates();
     bool areGeometryUpdatesBlocked() const;
 
-    xcb_visualid_t visual() const;
-    int depth() const;
     bool hasAlpha() const;
     QRegion opaqueRegion() const;
     QList<QRectF> shapeRegion() const;
@@ -321,7 +319,6 @@ private:
     static void sendClientMessage(xcb_window_t w, xcb_atom_t a, xcb_atom_t protocol,
                                   uint32_t data1 = 0, uint32_t data2 = 0, uint32_t data3 = 0);
 
-    void embedClient(xcb_window_t w, xcb_visualid_t visualid, xcb_colormap_t colormap, const QRect &nativeGeometry, uint8_t depth);
     void detectNoBorder();
     void updateFrameExtents();
     void setClientFrameExtents(const NETStrut &strut);
@@ -403,7 +400,6 @@ private:
     SyncRequest m_syncRequest;
     static bool check_active_modal; ///< \see X11Window::checkActiveModal()
     int sm_stacking_order;
-    xcb_visualid_t m_visual = XCB_NONE;
     int bit_depth = 24;
     QRegion opaque_region;
     QList<QRectF> m_shapeRegion;
@@ -452,19 +448,9 @@ private:
     X11Window *cl;
 };
 
-inline xcb_visualid_t X11Window::visual() const
-{
-    return m_visual;
-}
-
-inline int X11Window::depth() const
-{
-    return bit_depth;
-}
-
 inline bool X11Window::hasAlpha() const
 {
-    return depth() == 32;
+    return bit_depth == 32;
 }
 
 inline QRegion X11Window::opaqueRegion() const

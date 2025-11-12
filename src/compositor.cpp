@@ -450,7 +450,8 @@ static bool renderLayer(RenderView *view, Output *output, const std::shared_ptr<
         return false;
     }
     auto &[renderTarget, repaint] = beginInfo.value();
-    const QRegion bufferDamage = surfaceDamage.united(repaint).intersected(QRectF(QPointF(), view->viewport().size()).toAlignedRect());
+    const QRect surfaceRect = QRect(QPoint(), renderTarget.transform().map(view->layer()->sourceRect().size().toSize()));
+    const QRegion bufferDamage = surfaceDamage.united(repaint).intersected(surfaceRect);
     view->paint(renderTarget, bufferDamage);
     return view->layer()->endFrame(bufferDamage, surfaceDamage, frame.get());
 }
@@ -672,7 +673,10 @@ void Compositor::composite(RenderLoop *renderLoop)
 
     OutputLayer *cursorLayer = nullptr;
     Item *cursorItem = m_scene->cursorItem();
-    if (!m_brokenCursors.contains(renderLoop) && cursorItem->isVisible() && cursorItem->mapToView(cursorItem->boundingRect(), primaryView).intersects(output->geometryF())) {
+    if (!s_forceSoftwareCursor
+        && !m_brokenCursors.contains(renderLoop)
+        && cursorItem->isVisible()
+        && cursorItem->mapToView(cursorItem->boundingRect(), primaryView).intersects(output->geometryF())) {
         cursorLayer = findLayer(unusedOutputLayers, OutputLayerType::CursorOnly, primaryView->layer()->zpos() + 1);
         if (!cursorLayer) {
             cursorLayer = findLayer(unusedOutputLayers, OutputLayerType::EfficientOverlay, primaryView->layer()->zpos() + 1);
@@ -755,7 +759,7 @@ void Compositor::composite(RenderLoop *renderLoop)
             .directScanout = true,
             .directScanoutOnly = true,
             .highPriority = false,
-            .surfaceDamage = layer->repaints(),
+            .surfaceDamage = QRegion(),
             .requiredAlphaBits = 0,
         });
         unusedOutputLayers.removeOne(layer);
@@ -845,7 +849,9 @@ void Compositor::composite(RenderLoop *renderLoop)
                 continue;
             }
             toUpdate.push_back(layer.view->layer());
-            layer.surfaceDamage |= layer.view->collectDamage() | layer.view->layer()->repaints();
+            layer.surfaceDamage |= layer.view->collectDamage();
+            // TODO change output layer repaints to device coordinates too
+            layer.surfaceDamage |= scaleRegionAligned(layer.view->layer()->repaints(), output->scale());
             layer.view->layer()->resetRepaints();
             if (layer.view->layer()->isEnabled() && !layer.directScanout) {
                 result &= renderLayer(layer.view, output, frame, layer.surfaceDamage);

@@ -341,6 +341,15 @@ QMatrix4x4 OutputTransform::toMatrix() const
     return matrix;
 }
 
+QRegion OutputTransform::map(const QRegion &region, const QSize &bounds) const
+{
+    QRegion ret;
+    for (const QRect &rect : region) {
+        ret |= map(rect, bounds);
+    }
+    return ret;
+}
+
 Output::Output(QObject *parent)
     : QObject(parent)
 {
@@ -660,6 +669,9 @@ void Output::setState(const State &state)
     if (oldState.blendingColor != state.blendingColor) {
         Q_EMIT blendingColorChanged();
     }
+    if (oldState.sharpnessSetting != state.sharpnessSetting) {
+        Q_EMIT sharpnessChanged();
+    }
     if (oldState.enabled != state.enabled) {
         Q_EMIT enabledChanged();
     }
@@ -877,6 +889,11 @@ std::optional<uint32_t> Output::automaticMaxBitsPerColorLimit() const
 Output::EdrPolicy Output::edrPolicy() const
 {
     return m_state.edrPolicy;
+}
+
+double Output::sharpnessSetting() const
+{
+    return m_state.sharpnessSetting;
 }
 
 void Output::setAutoRotateAvailable(bool isAvailable)

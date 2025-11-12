@@ -43,12 +43,12 @@ void RenderView::setLayer(OutputLayer *layer)
     m_layer = layer;
 }
 
-void RenderView::addRepaint(const QRegion &region)
+void RenderView::addRepaint(const QRegion &logicalRegion)
 {
     if (!m_layer) {
         return;
     }
-    m_layer->addRepaint(region);
+    m_layer->addRepaint(logicalRegion);
 }
 
 void RenderView::scheduleRepaint(Item *item)
@@ -88,6 +88,65 @@ bool RenderView::shouldRenderHole(Item *item) const
     return false;
 }
 
+QRectF RenderView::mapToDeviceCoordinates(const QRectF &logicalGeometry) const
+{
+    return scaledRect(logicalGeometry.translated(-viewport().topLeft()), scale());
+}
+
+QRect RenderView::mapToDeviceCoordinatesAligned(const QRect &logicalGeometry) const
+{
+    return mapToDeviceCoordinates(QRectF(logicalGeometry)).toAlignedRect();
+}
+
+QRect RenderView::mapToDeviceCoordinatesAligned(const QRectF &logicalGeometry) const
+{
+    return mapToDeviceCoordinates(logicalGeometry).toAlignedRect();
+}
+
+QRect RenderView::mapToDeviceCoordinatesContained(const QRect &logicalGeometry) const
+{
+    const QRectF ret = scaledRect(QRectF(logicalGeometry).translated(-viewport().topLeft()), scale());
+    return QRect(QPoint(std::ceil(ret.x()), std::ceil(ret.y())),
+                 QPoint(std::floor(ret.x() + ret.width()) - 1, std::floor(ret.y() + ret.height()) - 1));
+}
+
+QRegion RenderView::mapToDeviceCoordinatesAligned(const QRegion &logicalGeometry) const
+{
+    QRegion ret;
+    for (const QRect &logicalRect : logicalGeometry) {
+        ret |= mapToDeviceCoordinatesAligned(logicalRect);
+    }
+    return ret;
+}
+
+QRegion RenderView::mapToDeviceCoordinatesContained(const QRegion &logicalGeometry) const
+{
+    QRegion ret;
+    for (const QRect &logicalRect : logicalGeometry) {
+        ret |= mapToDeviceCoordinatesContained(logicalRect);
+    }
+    return ret;
+}
+
+QRectF RenderView::mapFromDeviceCoordinates(const QRectF &deviceGeometry) const
+{
+    return scaledRect(deviceGeometry, 1.0 / scale()).translated(viewport().topLeft());
+}
+
+QRect RenderView::mapFromDeviceCoordinatesAligned(const QRect &deviceGeometry) const
+{
+    return scaledRect(deviceGeometry, 1.0 / scale()).translated(viewport().topLeft()).toAlignedRect();
+}
+
+QRegion RenderView::mapFromDeviceCoordinatesAligned(const QRegion &deviceGeometry) const
+{
+    QRegion ret;
+    for (const QRect &deviceRect : deviceGeometry) {
+        ret |= mapFromDeviceCoordinatesAligned(deviceRect);
+    }
+    return ret;
+}
+
 SceneView::SceneView(Scene *scene, Output *output, OutputLayer *layer)
     : RenderView(output, layer)
     , m_scene(scene)
@@ -120,11 +179,9 @@ void SceneView::postPaint()
     m_scene->postPaint();
 }
 
-void SceneView::paint(const RenderTarget &renderTarget, const QRegion &region)
+void SceneView::paint(const RenderTarget &renderTarget, const QRegion &deviceRegion)
 {
-    // FIXME damage in logical coordinates may cause issues here
-    // if the viewport is on a non-integer position!
-    m_scene->paint(renderTarget, region == infiniteRegion() ? infiniteRegion() : region.translated(viewport().topLeft().toPoint()));
+    m_scene->paint(renderTarget, deviceRegion);
 }
 
 double SceneView::desiredHdrHeadroom() const
@@ -287,8 +344,7 @@ void ItemView::prePaint()
 
 QRegion ItemView::collectDamage()
 {
-    // FIXME this offset should really not be rounded
-    return m_item->takeRepaints(this).translated(-viewport().topLeft().toPoint());
+    return mapToDeviceCoordinatesAligned(m_item->takeRepaints(this));
 }
 
 void ItemView::postPaint()
@@ -411,7 +467,7 @@ QList<SurfaceItem *> ItemTreeView::scanoutCandidates(ssize_t maxCount) const
 
 static void accumulateRepaints(Item *item, ItemTreeView *view, QRegion *repaints)
 {
-    *repaints += item->takeRepaints(view);
+    *repaints += view->mapToDeviceCoordinatesAligned(item->takeRepaints(view));
 
     const auto childItems = item->childItems();
     for (Item *childItem : childItems) {
@@ -428,15 +484,14 @@ QRegion ItemTreeView::collectDamage()
     return ret;
 }
 
-void ItemTreeView::paint(const RenderTarget &renderTarget, const QRegion &region)
+void ItemTreeView::paint(const RenderTarget &renderTarget, const QRegion &deviceRegion)
 {
-    const QRegion globalRegion = region == infiniteRegion() ? infiniteRegion() : region.translated(viewport().topLeft().toPoint());
     RenderViewport renderViewport(viewport(), m_output->scale(), renderTarget);
     auto renderer = m_item->scene()->renderer();
     renderer->beginFrame(renderTarget, renderViewport);
-    renderer->renderBackground(renderTarget, renderViewport, globalRegion);
+    renderer->renderBackground(renderTarget, renderViewport, deviceRegion);
     WindowPaintData data;
-    renderer->renderItem(renderTarget, renderViewport, m_item, 0, globalRegion, data, {}, {});
+    renderer->renderItem(renderTarget, renderViewport, m_item, 0, deviceRegion, data, {}, {});
     renderer->endFrame();
 }
 
@@ -528,19 +583,19 @@ ItemRenderer *Scene::renderer() const
 
 void Scene::addRepaintFull()
 {
-    addRepaint(geometry());
+    addLogicalRepaint(geometry());
 }
 
-void Scene::addRepaint(int x, int y, int width, int height)
+void Scene::addLogicalRepaint(int x, int y, int width, int height)
 {
-    addRepaint(QRegion(x, y, width, height));
+    addLogicalRepaint(QRegion(x, y, width, height));
 }
 
-void Scene::addRepaint(const QRegion &region)
+void Scene::addLogicalRepaint(const QRegion &logicalRegion)
 {
     for (const auto &view : std::as_const(m_views)) {
         const QRectF viewport = view->viewport();
-        QRegion dirtyRegion = region & viewport.toAlignedRect();
+        QRegion dirtyRegion = logicalRegion & viewport.toAlignedRect();
         // FIXME damage in logical coordinates may cause issues here
         // if the viewport is on a non-integer position!
         dirtyRegion.translate(-viewport.topLeft().toPoint());
@@ -550,11 +605,11 @@ void Scene::addRepaint(const QRegion &region)
     }
 }
 
-void Scene::addRepaint(RenderView *view, const QRegion &region)
+void Scene::addLogicalRepaint(RenderView *view, const QRegion &logicalRegion)
 {
     // FIXME damage in logical coordinates may cause issues here
     // if the viewport is on a non-integer position!
-    view->addRepaint(region.translated(-view->viewport().topLeft().toPoint()));
+    view->addRepaint(logicalRegion.translated(-view->viewport().topLeft().toPoint()));
 }
 
 QRegion Scene::damage() const

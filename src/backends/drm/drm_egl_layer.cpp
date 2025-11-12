@@ -65,9 +65,9 @@ std::optional<OutputLayerBeginFrameInfo> EglGbmLayer::doBeginFrame()
                                     m_requiredAlphaBits);
 }
 
-bool EglGbmLayer::doEndFrame(const QRegion &renderedRegion, const QRegion &damagedRegion, OutputFrame *frame)
+bool EglGbmLayer::doEndFrame(const QRegion &renderedDeviceRegion, const QRegion &damagedDeviceRegion, OutputFrame *frame)
 {
-    return m_surface.endRendering(damagedRegion, frame);
+    return m_surface.endRendering(damagedDeviceRegion, frame);
 }
 
 bool EglGbmLayer::preparePresentationTest()
@@ -85,7 +85,7 @@ bool EglGbmLayer::importScanoutBuffer(GraphicsBuffer *buffer, const std::shared_
     if (directScanoutDisabled) {
         return false;
     }
-    if (m_type == OutputLayerType::Primary && drmOutput()->shouldDisableNonPrimaryPlanes()) {
+    if (m_type != OutputLayerType::Primary && drmOutput()->shouldDisableNonPrimaryPlanes()) {
         return false;
     }
     if (gpu()->needsModeset()) {

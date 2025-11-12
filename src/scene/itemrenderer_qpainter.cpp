@@ -50,30 +50,33 @@ void ItemRendererQPainter::endFrame()
     m_painter->end();
 }
 
-void ItemRendererQPainter::renderBackground(const RenderTarget &renderTarget, const RenderViewport &viewport, const QRegion &region)
+void ItemRendererQPainter::renderBackground(const RenderTarget &renderTarget, const RenderViewport &viewport, const QRegion &deviceRegion)
 {
     m_painter->setCompositionMode(QPainter::CompositionMode_Source);
-    for (const QRect &rect : region) {
-        m_painter->fillRect(rect, Qt::transparent);
+    const QRegion clipped = deviceRegion & renderTarget.transformedRect();
+    for (const QRect &rect : clipped) {
+        m_painter->fillRect(viewport.mapFromDeviceCoordinates(rect), Qt::transparent);
     }
     m_painter->setCompositionMode(QPainter::CompositionMode_SourceOver);
 }
 
-void ItemRendererQPainter::renderItem(const RenderTarget &renderTarget, const RenderViewport &viewport, Item *item, int mask, const QRegion &_region, const WindowPaintData &data, const std::function<bool(Item *)> &filter, const std::function<bool(Item *)> &holeFilter)
+void ItemRendererQPainter::renderItem(const RenderTarget &renderTarget, const RenderViewport &viewport, Item *item, int mask, const QRegion &deviceRegion, const WindowPaintData &data, const std::function<bool(Item *)> &filter, const std::function<bool(Item *)> &holeFilter)
 {
-    QRegion region = _region;
+    QRegion effectiveRegion = deviceRegion;
 
-    const QRect boundingRect = item->mapToScene(item->boundingRect()).toAlignedRect();
     if (!(mask & (Scene::PAINT_WINDOW_TRANSFORMED | Scene::PAINT_SCREEN_TRANSFORMED))) {
-        region &= boundingRect;
+        const QRect boundingRect = viewport.mapToRenderTarget(item->mapToScene(item->boundingRect())).toAlignedRect();
+        effectiveRegion &= boundingRect;
     }
 
-    if (region.isEmpty()) {
+    if (effectiveRegion.isEmpty()) {
         return;
     }
 
+    const QRegion logicalRegion = viewport.mapFromDeviceCoordinatesAligned(effectiveRegion);
+
     m_painter->save();
-    m_painter->setClipRegion(region);
+    m_painter->setClipRegion(logicalRegion);
     m_painter->setClipping(true);
     m_painter->setOpacity(data.opacity());
 

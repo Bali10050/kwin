@@ -16,19 +16,10 @@
 #include "xwldrophandler.h"
 
 #include "atoms.h"
-#include "wayland/datadevice.h"
-#include "wayland/datasource.h"
 #include "wayland/seat.h"
-#include "wayland/surface.h"
 #include "wayland_server.h"
 #include "workspace.h"
 #include "x11window.h"
-
-#include <QMouseEvent>
-#include <QTimer>
-
-using DnDAction = KWin::DataDeviceManagerInterface::DnDAction;
-using DnDActions = KWin::DataDeviceManagerInterface::DnDActions;
 
 namespace KWin
 {
@@ -56,7 +47,6 @@ Xvisit::Xvisit(X11Window *target, AbstractDataSource *dataSource, Dnd *dnd, QObj
     , m_target(target)
     , m_dataSource(dataSource)
 {
-    // first check supported DND version
     xcb_connection_t *xcbConn = kwinApp()->x11Connection();
     xcb_get_property_cookie_t cookie = xcb_get_property(xcbConn,
                                                         0,
@@ -101,7 +91,6 @@ bool Xvisit::handleStatus(xcb_client_message_event_t *event)
 {
     xcb_client_message_data_t *data = &event->data;
     if (data->data32[0] != m_target->window()) {
-        // wrong target window
         return false;
     }
 
@@ -117,18 +106,15 @@ bool Xvisit::handleStatus(xcb_client_message_event_t *event)
     m_pos.pending = false;
 
     if (!m_state.dropRequested) {
-        // as long as the drop is not yet done determine requested action
         m_preferredAction = Dnd::atomToClientAction(actionAtom);
         determineProposedAction();
         requestDragAndDropAction();
     }
 
     if (m_pos.cached) {
-        // send cached position
         m_pos.cached = false;
         sendPosition(m_pos.cache);
     } else if (m_state.dropRequested) {
-        // drop was done in between, now close it out
         drop();
     }
     return true;
@@ -139,12 +125,10 @@ bool Xvisit::handleFinished(xcb_client_message_event_t *event)
     xcb_client_message_data_t *data = &event->data;
 
     if (data->data32[0] != m_target->window()) {
-        // different target window
         return false;
     }
 
     if (!m_state.dropRequested) {
-        // drop was never done
         doFinish();
         return true;
     }
@@ -184,7 +168,6 @@ void Xvisit::leave()
         return;
     }
     if (m_state.finished) {
-        // was already finished
         return;
     }
     // we only need to leave, when we entered before

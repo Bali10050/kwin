@@ -17,15 +17,12 @@
 #include "xwayland.h"
 
 #include "atoms.h"
-#include "wayland/datadevice.h"
-#include "wayland/datasource.h"
 #include "wayland/seat.h"
 #include "wayland/surface.h"
 #include "wayland_server.h"
 #include "window.h"
 #include "workspace.h"
 
-#include <QMouseEvent>
 #include <QTimer>
 
 namespace KWin
@@ -33,13 +30,16 @@ namespace KWin
 namespace Xwl
 {
 
-using DnDAction = KWin::DataDeviceManagerInterface::DnDAction;
-using DnDActions = KWin::DataDeviceManagerInterface::DnDActions;
-
 XToWlDrag::XToWlDrag(X11Source *source, Dnd *dnd)
     : m_dnd(dnd)
     , m_source(source)
 {
+    // Supported source actions are not known for sure, so we set all actions. When an XdndPosition
+    // message arrives, the user action in it will be forced. If the target surface doesn't support
+    // the user action, "none" action will be chosen instead.
+    m_source->dataSource()->setSupportedDndActions(DnDAction::Copy | DnDAction::Move | DnDAction::Ask);
+    m_source->dataSource()->setExclusiveAction(DnDAction::None);
+
     connect(source->dataSource(), &XwlDataSource::dropped, this, [this] {
         if (m_visit) {
             connect(m_visit, &WlVisit::finish, this, [this](WlVisit *visit) {
@@ -130,7 +130,7 @@ bool XToWlDrag::handleClientMessage(xcb_client_message_event_t *event)
 
 void XToWlDrag::setDragAndDropAction(DnDAction action)
 {
-    m_source->dataSource()->setSupportedDndActions(action);
+    m_source->dataSource()->setExclusiveAction(action);
 }
 
 DnDAction XToWlDrag::selectedDragAndDropAction()
@@ -192,7 +192,6 @@ WlVisit::WlVisit(Window *target, XToWlDrag *drag, Dnd *dnd)
     xcb_connection_t *xcbConn = kwinApp()->x11Connection();
 
     m_window = xcb_generate_id(xcbConn);
-    m_dnd->overwriteRequestorWindow(m_window);
 
     const uint32_t dndValues[] = {XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY | XCB_EVENT_MASK_PROPERTY_CHANGE};
     xcb_create_window(xcbConn,
@@ -219,7 +218,6 @@ WlVisit::WlVisit(Window *target, XToWlDrag *drag, Dnd *dnd)
     workspace()->addManualOverlay(m_window);
     workspace()->updateStackingOrder(true);
 
-    xcb_flush(xcbConn);
     m_mapped = true;
 }
 
@@ -227,12 +225,10 @@ WlVisit::~WlVisit()
 {
     xcb_connection_t *xcbConn = kwinApp()->x11Connection();
     xcb_destroy_window(xcbConn, m_window);
-    xcb_flush(xcbConn);
 }
 
 bool WlVisit::leave()
 {
-    m_dnd->overwriteRequestorWindow(XCB_WINDOW_NONE);
     unmapProxyWindow();
     return m_finished;
 }
@@ -275,7 +271,6 @@ static QList<xcb_atom_t> mimeTypeListFromWindow(xcb_window_t window)
 bool WlVisit::handleEnter(xcb_client_message_event_t *event)
 {
     if (m_entered) {
-        // a drag already entered
         return true;
     }
     m_entered = true;
@@ -315,7 +310,7 @@ bool WlVisit::handlePosition(xcb_client_message_event_t *event)
     }
 
     const xcb_timestamp_t timestamp = data->data32[3];
-    m_drag->x11Source()->setTimestamp(timestamp);
+    m_drag->selection()->setTimestamp(timestamp);
 
     xcb_atom_t actionAtom = m_version > 1 ? data->data32[4] : atoms->xdnd_action_copy;
     auto action = Dnd::atomToClientAction(actionAtom);
@@ -343,7 +338,7 @@ bool WlVisit::handleDrop(xcb_client_message_event_t *event)
     xcb_client_message_data_t *data = &event->data;
     m_srcWindow = data->data32[0];
     const xcb_timestamp_t timestamp = data->data32[2];
-    m_drag->x11Source()->setTimestamp(timestamp);
+    m_drag->selection()->setTimestamp(timestamp);
 
     // we do nothing more here, the drop is being processed
     // through the X11Source object
@@ -369,7 +364,6 @@ bool WlVisit::handleLeave(xcb_client_message_event_t *event)
 
 void WlVisit::sendStatus()
 {
-    // receive position events
     uint32_t flags = 1 << 1;
     if (targetAcceptsAction()) {
         // accept the drop
@@ -410,7 +404,6 @@ void WlVisit::unmapProxyWindow()
     xcb_unmap_window(xcbConn, m_window);
     workspace()->removeManualOverlay(m_window);
     workspace()->updateStackingOrder(true);
-    xcb_flush(xcbConn);
     m_mapped = false;
 }
 

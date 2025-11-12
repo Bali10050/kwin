@@ -60,7 +60,14 @@ public:
     {
         return m_window;
     }
-    void overwriteRequestorWindow(xcb_window_t window);
+    xcb_timestamp_t timestamp() const
+    {
+        return m_timestamp;
+    }
+    void setTimestamp(xcb_timestamp_t timestamp)
+    {
+        m_timestamp = timestamp;
+    }
 
 protected:
     Selection(xcb_atom_t atom, QObject *parent);
@@ -87,12 +94,7 @@ protected:
     }
     // must be called in order to provide data from Wl to X
     void ownSelection(bool own);
-    void setWindow(xcb_window_t window)
-    {
-        m_window = window;
-    }
 
-private:
     bool handleSelectionRequest(xcb_selection_request_event_t *event);
     bool handleSelectionNotify(xcb_selection_notify_event_t *event);
     bool handlePropertyNotify(xcb_property_notify_event_t *event);
@@ -108,8 +110,7 @@ private:
     xcb_atom_t m_atom = XCB_ATOM_NONE;
     xcb_window_t m_owner = XCB_WINDOW_NONE;
     xcb_window_t m_window = XCB_WINDOW_NONE;
-    xcb_window_t m_requestorWindow = XCB_WINDOW_NONE;
-    xcb_timestamp_t m_timestamp;
+    xcb_timestamp_t m_timestamp = 0;
 
     // Active source, if any. Only one of them at max can exist
     // at the same time.
@@ -120,8 +121,6 @@ private:
     QList<TransferWltoX *> m_wlToXTransfers;
     QList<TransferXtoWl *> m_xToWlTransfers;
     QTimer *m_timeoutTransfers = nullptr;
-
-    bool m_disownPending = false;
 
     Q_DISABLE_COPY(Selection)
 };

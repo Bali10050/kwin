@@ -55,26 +55,27 @@ void ThumbnailAsideEffect::reconfigure(ReconfigureFlags)
     arrange();
 }
 
-void ThumbnailAsideEffect::paintScreen(const RenderTarget &renderTarget, const RenderViewport &viewport, int mask, const QRegion &region, Output *screen)
+void ThumbnailAsideEffect::paintScreen(const RenderTarget &renderTarget, const RenderViewport &viewport, int mask, const QRegion &deviceRegion, Output *screen)
 {
     painted = QRegion();
-    effects->paintScreen(renderTarget, viewport, mask, region, screen);
+    effects->paintScreen(renderTarget, viewport, mask, deviceRegion, screen);
 
     for (const Data &d : std::as_const(windows)) {
-        if (painted.intersects(d.rect)) {
+        if (painted.intersects(viewport.mapToDeviceCoordinatesAligned(d.rect))) {
             WindowPaintData data;
             data.multiplyOpacity(opacity);
             QRect region;
             setPositionTransformations(data, region, d.window, d.rect, Qt::KeepAspectRatio);
-            effects->drawWindow(renderTarget, viewport, d.window, PAINT_WINDOW_OPAQUE | PAINT_WINDOW_TRANSLUCENT | PAINT_WINDOW_TRANSFORMED, region, data);
+            effects->drawWindow(renderTarget, viewport, d.window, PAINT_WINDOW_OPAQUE | PAINT_WINDOW_TRANSLUCENT | PAINT_WINDOW_TRANSFORMED,
+                                viewport.mapToDeviceCoordinatesAligned(region), data);
         }
     }
 }
 
-void ThumbnailAsideEffect::paintWindow(const RenderTarget &renderTarget, const RenderViewport &viewport, EffectWindow *w, int mask, QRegion region, WindowPaintData &data)
+void ThumbnailAsideEffect::paintWindow(const RenderTarget &renderTarget, const RenderViewport &viewport, EffectWindow *w, int mask, const QRegion &deviceGeometry, WindowPaintData &data)
 {
-    effects->paintWindow(renderTarget, viewport, w, mask, region, data);
-    painted += region;
+    effects->paintWindow(renderTarget, viewport, w, mask, deviceGeometry, data);
+    painted += deviceGeometry;
 }
 
 void ThumbnailAsideEffect::slotWindowDamaged(EffectWindow *w)

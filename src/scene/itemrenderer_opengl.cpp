@@ -86,23 +86,21 @@ static RenderGeometry clipQuads(const Item *item, const ItemRendererOpenGL::Rend
 {
     const WindowQuadList quads = item->quads();
 
-    // Item to world translation.
-    const QPointF worldTranslation = context->transformStack.top().map(QPointF(0., 0.));
     const qreal scale = context->renderTargetScale;
+    const QPointF itemToDeviceTranslation = context->transformStack.top().map(QPointF(0., 0.)) - context->viewportOrigin * scale;
 
     RenderGeometry geometry;
     geometry.reserve(quads.count() * 6);
 
     // split all quads in bounding rect with the actual rects in the region
     for (const WindowQuad &quad : std::as_const(quads)) {
-        if (context->clip != infiniteRegion() && !context->hardwareClipping) {
+        if (context->deviceClip != infiniteRegion() && !context->hardwareClipping) {
             // Scale to device coordinates, rounding as needed.
-            QRectF deviceBounds = snapToPixelGridF(scaledRect(quad.bounds(), scale));
+            const QRectF deviceBounds = snapToPixelGridF(scaledRect(quad.bounds(), scale));
 
-            for (const QRect &clipRect : std::as_const(context->clip)) {
-                QRectF deviceClipRect = snapToPixelGridF(scaledRect(clipRect, scale)).translated(-worldTranslation);
-
-                const QRectF &intersected = deviceClipRect.intersected(deviceBounds);
+            for (const QRect &deviceClipRect : std::as_const(context->deviceClip)) {
+                const QRectF relativeDeviceClipRect = snapToPixelGridF(deviceClipRect).translated(-itemToDeviceTranslation);
+                const QRectF intersected = relativeDeviceClipRect.intersected(deviceBounds);
                 if (intersected.isValid()) {
                     if (deviceBounds == intersected) {
                         // case 1: completely contains, include and do not check other rects
@@ -306,19 +304,20 @@ void ItemRendererOpenGL::createRenderNode(Item *item, RenderContext *context, co
     }
 }
 
-void ItemRendererOpenGL::renderBackground(const RenderTarget &renderTarget, const RenderViewport &viewport, const QRegion &region)
+void ItemRendererOpenGL::renderBackground(const RenderTarget &renderTarget, const RenderViewport &viewport, const QRegion &deviceRegion)
 {
-    if (region == infiniteRegion() || (region.rectCount() == 1 && (*region.begin()) == viewport.renderRect())) {
+    const auto clipped = deviceRegion & renderTarget.transformedRect();
+    if (clipped == renderTarget.transformedRect()) {
         glClearColor(0, 0, 0, 0);
         glClear(GL_COLOR_BUFFER_BIT);
-    } else if (!region.isEmpty()) {
+    } else if (!clipped.isEmpty()) {
         glClearColor(0, 0, 0, 0);
         glEnable(GL_SCISSOR_TEST);
 
         const auto targetSize = renderTarget.size();
-        for (const QRect &r : region) {
-            const auto deviceRect = viewport.mapToRenderTarget(r);
-            glScissor(deviceRect.x(), targetSize.height() - (deviceRect.y() + deviceRect.height()), deviceRect.width(), deviceRect.height());
+        for (const QRect &deviceRect : clipped) {
+            const auto bufferRect = viewport.transform().map(deviceRect, renderTarget.transformedSize());
+            glScissor(bufferRect.x(), targetSize.height() - (bufferRect.y() + bufferRect.height()), bufferRect.width(), bufferRect.height());
             glClear(GL_COLOR_BUFFER_BIT);
         }
 
@@ -326,18 +325,19 @@ void ItemRendererOpenGL::renderBackground(const RenderTarget &renderTarget, cons
     }
 }
 
-void ItemRendererOpenGL::renderItem(const RenderTarget &renderTarget, const RenderViewport &viewport, Item *item, int mask, const QRegion &region, const WindowPaintData &data, const std::function<bool(Item *)> &filter, const std::function<bool(Item *)> &holeFilter)
+void ItemRendererOpenGL::renderItem(const RenderTarget &renderTarget, const RenderViewport &viewport, Item *item, int mask, const QRegion &deviceRegion, const WindowPaintData &data, const std::function<bool(Item *)> &filter, const std::function<bool(Item *)> &holeFilter)
 {
-    if (region.isEmpty()) {
+    if (deviceRegion.isEmpty()) {
         return;
     }
 
     RenderContext renderContext{
         .projectionMatrix = viewport.projectionMatrix(),
         .rootTransform = data.toMatrix(viewport.scale()), // TODO: unify transforms
-        .clip = region,
-        .hardwareClipping = region != infiniteRegion() && ((mask & Scene::PAINT_WINDOW_TRANSFORMED) || (mask & Scene::PAINT_SCREEN_TRANSFORMED)),
+        .deviceClip = deviceRegion & renderTarget.transformedRect(),
+        .hardwareClipping = deviceRegion != infiniteRegion() && ((mask & Scene::PAINT_WINDOW_TRANSFORMED) || (mask & Scene::PAINT_SCREEN_TRANSFORMED)),
         .renderTargetScale = viewport.scale(),
+        .viewportOrigin = viewport.renderRect().topLeft(),
     };
 
     renderContext.transformStack.push(QMatrix4x4());
@@ -381,9 +381,9 @@ void ItemRendererOpenGL::renderItem(const RenderTarget &renderTarget, const Rend
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
     // The scissor region must be in the render target local coordinate system.
-    QRegion scissorRegion = infiniteRegion();
+    QRegion scissorRegion = QRect(QPoint(), renderTarget.size());
     if (renderContext.hardwareClipping) {
-        scissorRegion = viewport.mapToRenderTarget(region);
+        scissorRegion = viewport.transform().map(deviceRegion & renderTarget.transformedRect(), renderTarget.transformedSize());
     }
 
     ShaderTraits lastTraits;
@@ -496,7 +496,7 @@ void ItemRendererOpenGL::renderItem(const RenderTarget &renderTarget, const Rend
     }
 }
 
-void ItemRendererOpenGL::visualizeFractional(const RenderViewport &viewport, const QRegion &region, const RenderContext &renderContext)
+void ItemRendererOpenGL::visualizeFractional(const RenderViewport &viewport, const QRegion &logicalRegion, const RenderContext &renderContext)
 {
     if (!m_debug.fractionalShader) {
         m_debug.fractionalShader = ShaderManager::instance()->generateShaderFromFile(
@@ -530,7 +530,7 @@ void ItemRendererOpenGL::visualizeFractional(const RenderViewport &viewport, con
         m_debug.fractionalShader->setUniform("geometrySize", size);
         m_debug.fractionalShader->setUniform(GLShader::Mat4Uniform::ModelViewProjectionMatrix, renderContext.projectionMatrix * renderNode.transformMatrix);
 
-        vbo->draw(region, GL_TRIANGLES, renderNode.firstVertex,
+        vbo->draw(logicalRegion, GL_TRIANGLES, renderNode.firstVertex,
                   renderNode.vertexCount, renderContext.hardwareClipping);
     }
 }

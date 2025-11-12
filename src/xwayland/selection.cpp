@@ -32,10 +32,6 @@ Selection::Selection(xcb_atom_t atom, QObject *parent)
     : QObject(parent)
     , m_atom(atom)
 {
-    xcb_connection_t *xcbConn = kwinApp()->x11Connection();
-    m_window = xcb_generate_id(kwinApp()->x11Connection());
-    m_requestorWindow = m_window;
-    xcb_flush(xcbConn);
 }
 
 bool Selection::handleXfixesNotify(xcb_xfixes_selection_notify_event_t *event)
@@ -47,20 +43,19 @@ bool Selection::handleXfixesNotify(xcb_xfixes_selection_notify_event_t *event)
         return false;
     }
 
+    const xcb_window_t previousOwner = m_owner;
     m_owner = event->owner;
 
-    // TODO: Since we track the selection owner window, m_disownPending should be unnecessary now.
-    // If event->owner is None and m_owner != m_window, it means selection got unset by a real client.
-    if (m_disownPending) {
-        // notify of our own disown - ignore it
-        m_disownPending = false;
-        return true;
+    if (m_owner == XCB_WINDOW_NONE) {
+        if (previousOwner == m_window) {
+            return true;
+        }
     }
-    if (event->owner == m_window && m_waylandSource) {
+
+    if (event->owner == m_window) {
         // When we claim a selection we must use XCB_TIME_CURRENT,
         // grab the actual timestamp here to answer TIMESTAMP requests
         // correctly
-        m_waylandSource->setTimestamp(event->timestamp);
         m_timestamp = event->timestamp;
         return true;
     }
@@ -108,7 +103,6 @@ void Selection::sendSelectionNotify(xcb_selection_request_event_t *event, bool s
 
     xcb_connection_t *xcbConn = kwinApp()->x11Connection();
     xcb_send_event(xcbConn, 0, event->requestor, XCB_EVENT_MASK_NO_EVENT, (const char *)&u);
-    xcb_flush(xcbConn);
 }
 
 void Selection::registerXfixes()
@@ -119,7 +113,6 @@ void Selection::registerXfixes()
                                       m_window,
                                       m_atom,
                                       mask);
-    xcb_flush(xcbConn);
 }
 
 void Selection::setWlSource(WlSource *source)
@@ -144,8 +137,9 @@ void Selection::createX11Source(xcb_xfixes_selection_notify_event_t *event)
     }
 
     m_waylandSource.reset();
+    m_timestamp = event->timestamp;
 
-    m_xSource = std::make_unique<X11Source>(this, event);
+    m_xSource = std::make_unique<X11Source>(this);
     connect(m_xSource.get(), &X11Source::targetsReceived, this, &Selection::x11TargetsReceived);
     connect(m_xSource.get(), &X11Source::transferRequested, this, &Selection::startTransferToWayland);
 }
@@ -160,25 +154,12 @@ void Selection::ownSelection(bool own)
                                 XCB_TIME_CURRENT_TIME);
     } else {
         if (m_owner == m_window) {
-            m_disownPending = true;
             xcb_set_selection_owner(xcbConn,
                                     XCB_WINDOW_NONE,
                                     m_atom,
                                     m_timestamp);
         }
     }
-    xcb_flush(xcbConn);
-}
-
-void Selection::overwriteRequestorWindow(xcb_window_t window)
-{
-    Q_ASSERT(m_xSource);
-    if (window == XCB_WINDOW_NONE) {
-        // reset
-        window = m_window;
-    }
-    m_requestorWindow = window;
-    m_xSource->setRequestor(window);
 }
 
 bool Selection::handleSelectionRequest(xcb_selection_request_event_t *event)
@@ -243,7 +224,7 @@ void Selection::startTransferToWayland(const QString &mimeType, qint32 fd)
         return;
     }
 
-    auto *transfer = new TransferXtoWl(m_atom, mimeAtom, fd, m_xSource->timestamp(), m_requestorWindow, this);
+    auto *transfer = new TransferXtoWl(m_atom, mimeAtom, fd, m_timestamp, m_window, this);
     m_xToWlTransfers << transfer;
 
     connect(transfer, &TransferXtoWl::finished, this, [this, transfer]() {
@@ -256,30 +237,16 @@ void Selection::startTransferToWayland(const QString &mimeType, qint32 fd)
 
 void Selection::startTransferToX(xcb_selection_request_event_t *event, qint32 fd)
 {
-    // create new wl to x data transfer object
     auto *transfer = new TransferWltoX(m_atom, event, fd, this);
 
-    connect(transfer, &TransferWltoX::selectionNotify, this, &Selection::sendSelectionNotify);
     connect(transfer, &TransferWltoX::finished, this, [this, transfer]() {
-        // TODO: serialize? see comment below.
-        //        const bool wasActive = (transfer == m_wlToXTransfers[0]);
         transfer->deleteLater();
         m_wlToXTransfers.removeOne(transfer);
         endTimeoutTransfersTimer();
-        //        if (wasActive && !m_wlToXTransfers.isEmpty()) {
-        //            m_wlToXTransfers[0]->startTransferFromSource();
-        //        }
     });
 
-    // add it to list of queued transfers
     m_wlToXTransfers.append(transfer);
-
-    // TODO: Do we need to serialize the transfers, or can we do
-    //       them in parallel as we do it right now?
     transfer->startTransferFromSource();
-    //    if (m_wlToXTransfers.size() == 1) {
-    //        transfer->startTransferFromSource();
-    //    }
     startTimeoutTransfersTimer();
 }
 
@@ -303,10 +270,16 @@ void Selection::endTimeoutTransfersTimer()
 
 void Selection::timeoutTransfers()
 {
-    for (TransferXtoWl *transfer : std::as_const(m_xToWlTransfers)) {
+    // A transfer can be removed from the corresponding list on timeout, so avoid iterating directly
+    // on m_xToWlTransfers and m_wlToXTransfers.
+
+    const auto xToWaylandTransfers = m_xToWlTransfers;
+    for (TransferXtoWl *transfer : xToWaylandTransfers) {
         transfer->timeout();
     }
-    for (TransferWltoX *transfer : std::as_const(m_wlToXTransfers)) {
+
+    const auto waylandToXTransfers = m_wlToXTransfers;
+    for (TransferWltoX *transfer : waylandToXTransfers) {
         transfer->timeout();
     }
 }

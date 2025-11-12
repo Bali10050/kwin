@@ -7,17 +7,9 @@
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 #include "transfer.h"
-
-#include "databridge.h"
-#include "xwayland.h"
-
 #include "atoms.h"
-#include "wayland/datadevice.h"
-#include "wayland/datasource.h"
-#include "wayland/seat.h"
-#include "wayland_server.h"
-#include "window.h"
-#include "workspace.h"
+#include "selection.h"
+#include "xwayland.h"
 
 #include <xcb/xcb_event.h>
 #include <xcb/xfixes.h>
@@ -113,7 +105,6 @@ int TransferWltoX::flushSourceData()
                         8,
                         m_chunks.first().first.size(),
                         m_chunks.first().first.data());
-    xcb_flush(xcbConn);
 
     m_propertyIsSet = true;
     resetTimeout();
@@ -141,14 +132,13 @@ void TransferWltoX::startIncr()
                         m_request->property,
                         atoms->incr,
                         32, 1, &chunkSpace);
-    xcb_flush(xcbConn);
 
     setIncr(true);
     // first data will be flushed after the property has been deleted
     // again by the requestor
     m_flushPropertyOnDelete = true;
     m_propertyIsSet = true;
-    Q_EMIT selectionNotify(m_request, true);
+    Selection::sendSelectionNotify(m_request, true);
 }
 
 void TransferWltoX::readWlSource()
@@ -191,7 +181,7 @@ void TransferWltoX::readWlSource()
             // non incremental transfer is to be completed now,
             // data can be transferred to X client via a single property set
             flushSourceData();
-            Q_EMIT selectionNotify(m_request, true);
+            Selection::sendSelectionNotify(m_request, true);
             endTransfer();
         }
     } else if (m_chunks.last().second == s_incrChunkSize) {
@@ -245,7 +235,6 @@ void TransferWltoX::handlePropertyDelete()
                                 m_request->property,
                                 m_request->target,
                                 8, 0, nullptr);
-            xcb_flush(xcbConn);
             m_flushPropertyOnDelete = false;
             endTransfer();
         } else if (!m_chunks.isEmpty()) {
@@ -281,14 +270,12 @@ TransferXtoWl::TransferXtoWl(xcb_atom_t selection, xcb_atom_t target, qint32 fd,
                           target,
                           atoms->wl_selection,
                           timestamp);
-    xcb_flush(xcbConn);
 }
 
 TransferXtoWl::~TransferXtoWl()
 {
     xcb_connection_t *xcbConn = kwinApp()->x11Connection();
     xcb_destroy_window(xcbConn, m_window);
-    xcb_flush(xcbConn);
 
     delete m_receiver;
     m_receiver = nullptr;
@@ -461,7 +448,6 @@ void TransferXtoWl::dataSourceWrite()
             xcb_delete_property(xcbConn,
                                 m_window,
                                 atoms->wl_selection);
-            xcb_flush(xcbConn);
         } else {
             // transfer complete
             endTransfer();
