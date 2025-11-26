@@ -1002,7 +1002,16 @@ void Compositor::assignOutputLayers(LogicalOutput *logicalOutput, BackendOutput 
         sceneView->setRenderOffset(backendOutput->deviceOffset());
         const auto updateViewport = [view = sceneView.get(), logicalOutput, backendOutput]() {
             // this matches how the renderer snaps elements to the pixel grid
-            const Rect scaled = logicalOutput->geometryF().scaled(backendOutput->scale()).rounded();
+            Rect scaled = logicalOutput->geometryF().scaled(backendOutput->scale()).rounded();
+            if (logicalOutput->tileGroupId().has_value()) {
+                const auto tileInfo = backendOutput->tileInfo();
+                Q_ASSERT(tileInfo);
+                const int32_t x = std::round(scaled.x() + scaled.width() * tileInfo->tileLocation.x() / double(tileInfo->completeSizeInTiles.width()));
+                const int32_t y = std::round(scaled.y() + scaled.height() * tileInfo->tileLocation.y() / double(tileInfo->completeSizeInTiles.height()));
+                const int32_t w = std::round(scaled.width() / double(tileInfo->completeSizeInTiles.width()));
+                const int32_t h = std::round(scaled.height() / double(tileInfo->completeSizeInTiles.height()));
+                scaled = Rect(x, y, w, h);
+            }
             view->setViewport(scaled.scaled(1.0 / backendOutput->scale()));
         };
         updateViewport();
