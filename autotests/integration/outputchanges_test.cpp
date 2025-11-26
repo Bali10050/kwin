@@ -2454,6 +2454,7 @@ void OutputChangesTest::testTiledDisplay()
                 .completeSizeInTiles = QSize(2, 1),
                 .tileLocation = QPoint(1, 0),
                 .tileSizeInPixels = QSize(1280, 1200),
+                .completeSizeInPixels = QSize(2560, 1200),
             },
         },
         Test::OutputInfo{
@@ -2464,6 +2465,7 @@ void OutputChangesTest::testTiledDisplay()
                 .completeSizeInTiles = QSize(2, 1),
                 .tileLocation = QPoint(0, 0),
                 .tileSizeInPixels = QSize(1280, 1200),
+                .completeSizeInPixels = QSize(2560, 1200),
             },
         },
     });

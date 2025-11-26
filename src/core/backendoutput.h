@@ -339,6 +339,7 @@ public:
         QSize completeSizeInTiles;
         QPoint tileLocation;
         QSize tileSizeInPixels;
+        QSize completeSizeInPixels;
     };
     const std::optional<TileInfo> &tileInfo() const;
 

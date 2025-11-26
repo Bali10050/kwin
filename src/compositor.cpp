@@ -342,21 +342,19 @@ static bool isTearingRequested(const Item *item)
     });
 }
 
-static Rect mapGlobalLogicalToOutputDeviceCoordinates(const RectF &logicalGeometry, LogicalOutput *logicalOutput, BackendOutput *backendOutput)
+static Rect mapGlobalLogicalToOutputDeviceCoordinates(SceneView *primaryView, const RectF &logicalGeometry, LogicalOutput *logicalOutput, BackendOutput *backendOutput)
 {
     const Rect localDevice = logicalGeometry.scaled(backendOutput->scale()).rounded();
-    const QPoint scaledOutputPos = (logicalOutput->geometryF().topLeft() * backendOutput->scale()).toPoint();
+    const QPoint scaledOutputPos = (primaryView->viewport().topLeft() * backendOutput->scale()).toPoint();
     return backendOutput->transform().map(localDevice.translated(backendOutput->deviceOffset() - scaledOutputPos), backendOutput->pixelSize());
 }
 
-static Rect mapItemToOutputDeviceCoordinates(Item *item, RenderView *view, LogicalOutput *logicalOutput, BackendOutput *backendOutput)
+static Rect mapItemToOutputDeviceCoordinates(Item *item, SceneView *primaryView, LogicalOutput *logicalOutput, BackendOutput *backendOutput)
 {
-    const Rect scaledItemRect = item->mapToView(item->rect(), view).scaled(view->scale()).rounded();
-    const QPoint scaledOutputPos = (logicalOutput->geometryF().topLeft() * view->scale()).toPoint();
-    return backendOutput->transform().map(scaledItemRect.translated(backendOutput->deviceOffset() - scaledOutputPos), backendOutput->pixelSize());
+    return mapGlobalLogicalToOutputDeviceCoordinates(primaryView, item->mapToView(item->rect(), primaryView), logicalOutput, backendOutput);
 }
 
-static bool prepareDirectScanout(RenderView *view, LogicalOutput *logicalOutput, BackendOutput *backendOutput, const std::shared_ptr<OutputFrame> &frame)
+static bool prepareDirectScanout(SceneView *primaryView, RenderView *view, LogicalOutput *logicalOutput, BackendOutput *backendOutput, const std::shared_ptr<OutputFrame> &frame)
 {
     if (!view->isVisible()) {
         return false;
@@ -387,7 +385,7 @@ static bool prepareDirectScanout(RenderView *view, LogicalOutput *logicalOutput,
         candidate->setScanoutHint(layer->scanoutDevice(), formats);
         return false;
     }
-    layer->setTargetRect(mapItemToOutputDeviceCoordinates(candidate, view, logicalOutput, backendOutput));
+    layer->setTargetRect(mapItemToOutputDeviceCoordinates(candidate, primaryView, logicalOutput, backendOutput));
     layer->setEnabled(true);
     layer->setSourceRect(candidate->bufferSourceBox());
     layer->setBufferTransform(candidate->bufferTransform());
@@ -402,12 +400,12 @@ static bool prepareDirectScanout(RenderView *view, LogicalOutput *logicalOutput,
     return ret;
 }
 
-static bool prepareRendering(RenderView *view, LogicalOutput *logicalOutput, BackendOutput *backendOutput, uint32_t requiredAlphaBits)
+static bool prepareRendering(SceneView *primaryView, RenderView *view, LogicalOutput *logicalOutput, BackendOutput *backendOutput, uint32_t requiredAlphaBits)
 {
     if (!view->isVisible()) {
         return false;
     }
-    auto nativeRect = mapGlobalLogicalToOutputDeviceCoordinates(view->viewport(), logicalOutput, backendOutput);
+    auto nativeRect = mapGlobalLogicalToOutputDeviceCoordinates(primaryView, view->viewport(), logicalOutput, backendOutput);
     // we need to render black bars for mirroring,
     // so add the relevant area to the source and target rect
     const QSize renderOffset = backendOutput->transform().map(QSize(view->renderOffset().x(), view->renderOffset().y()));
@@ -727,7 +725,7 @@ void Compositor::composite(RenderLoop *renderLoop)
             if (isCursor) {
                 // special handling for the cursor
                 view = std::make_unique<ItemTreeView>(primaryView, item, logicalOutput, output, layer);
-                connect(layer, &OutputLayer::repaintScheduled, view.get(), [logicalOutput, output, cursorView = view.get()]() {
+                connect(layer, &OutputLayer::repaintScheduled, view.get(), [logicalOutput, output, cursorView = view.get(), primaryView]() {
                     // this just deals with moving the plane asynchronously, for improved latency.
                     // enabling, disabling and updating the cursor image still happen in composite()
                     const auto outputLayer = cursorView->layer();
@@ -747,7 +745,7 @@ void Compositor::composite(RenderLoop *renderLoop)
                         }).value_or(30);
                         maxVrrCursorDelay = std::chrono::nanoseconds(1'000'000'000) / std::max(effectiveMinRate, 30u);
                     }
-                    outputLayer->setTargetRect(mapGlobalLogicalToOutputDeviceCoordinates(cursorView->viewport(), logicalOutput, output));
+                    outputLayer->setTargetRect(mapGlobalLogicalToOutputDeviceCoordinates(primaryView, cursorView->viewport(), logicalOutput, output));
                     outputLayer->setEnabled(true);
                     if (output->presentAsync(outputLayer, maxVrrCursorDelay)) {
                         // prevent composite() from also pushing an update with the cursor layer
@@ -793,9 +791,9 @@ void Compositor::composite(RenderLoop *renderLoop)
 
     // update all of them for the ideal configuration
     for (auto &layer : layers) {
-        if (prepareDirectScanout(layer.view, logicalOutput, output, frame)) {
+        if (prepareDirectScanout(primaryView, layer.view, logicalOutput, output, frame)) {
             layer.directScanout = true;
-        } else if (!layer.directScanoutOnly && prepareRendering(layer.view, logicalOutput, output, layer.requiredAlphaBits)) {
+        } else if (!layer.directScanoutOnly && prepareRendering(primaryView, layer.view, logicalOutput, output, layer.requiredAlphaBits)) {
             layer.directScanout = false;
         } else {
             layer.view->layer()->setEnabled(false);
@@ -809,7 +807,7 @@ void Compositor::composite(RenderLoop *renderLoop)
         bool primaryFailure = false;
         auto &primary = layers.front();
         if (primary.directScanout) {
-            if (prepareRendering(primary.view, logicalOutput, output, primary.requiredAlphaBits)) {
+            if (prepareRendering(primaryView, primary.view, logicalOutput, output, primary.requiredAlphaBits)) {
                 primary.directScanout = false;
                 result = output->testPresentation(frame);
             } else {
@@ -894,7 +892,7 @@ void Compositor::composite(RenderLoop *renderLoop)
                 layer.view->setExclusive(false);
             }
             // re-render without direct scanout
-            if (prepareRendering(primary.view, logicalOutput, output, primary.requiredAlphaBits)
+            if (prepareRendering(primaryView, primary.view, logicalOutput, output, primary.requiredAlphaBits)
                 && renderLayer(primary.view, logicalOutput, output, frame, primary.surfaceDamage)) {
                 result = output->present(toUpdate, frame);
             } else {
@@ -907,7 +905,7 @@ void Compositor::composite(RenderLoop *renderLoop)
             // try again even without the cursor layer
             layers[1].view->layer()->setEnabled(false);
             layers[1].view->setExclusive(false);
-            if (prepareRendering(primary.view, logicalOutput, output, primary.requiredAlphaBits)
+            if (prepareRendering(primaryView, primary.view, logicalOutput, output, primary.requiredAlphaBits)
                 && renderLayer(primary.view, logicalOutput, output, frame, Region::infinite())) {
                 result = output->present(toUpdate, frame);
                 if (result) {
@@ -931,7 +929,7 @@ void Compositor::composite(RenderLoop *renderLoop)
 
     // the layers have to stay valid until after postPaint, so this needs to happen after it
     if (!result) {
-        qCWarning(KWIN_CORE, "Failed to find a working output layer configuration! Enabled layers:");
+        qCWarning(KWIN_CORE, "Failed to find a working output layer configuration for %s! Enabled layers:", qPrintable(output->name()));
         for (const auto &layer : layers) {
             if (!layer.view->layer()->isEnabled()) {
                 continue;
@@ -1003,13 +1001,12 @@ void Compositor::assignOutputLayers(LogicalOutput *logicalOutput, BackendOutput 
         const auto updateViewport = [view = sceneView.get(), logicalOutput, backendOutput]() {
             // this matches how the renderer snaps elements to the pixel grid
             Rect scaled = logicalOutput->geometryF().scaled(backendOutput->scale()).rounded();
-            if (logicalOutput->tileGroupId().has_value()) {
-                const auto tileInfo = backendOutput->tileInfo();
-                Q_ASSERT(tileInfo);
+            if (const auto tileInfo = backendOutput->tileInfo(); tileInfo && workspace()->primaryTileGroupOutput(tileInfo->groupId)) {
                 const int32_t x = std::round(scaled.x() + scaled.width() * tileInfo->tileLocation.x() / double(tileInfo->completeSizeInTiles.width()));
                 const int32_t y = std::round(scaled.y() + scaled.height() * tileInfo->tileLocation.y() / double(tileInfo->completeSizeInTiles.height()));
                 const int32_t w = std::round(scaled.width() / double(tileInfo->completeSizeInTiles.width()));
                 const int32_t h = std::round(scaled.height() / double(tileInfo->completeSizeInTiles.height()));
+                qWarning() << "using tiled output info on" << backendOutput->name() << scaled << "->" << Rect(x, y, w, h);
                 scaled = Rect(x, y, w, h);
             }
             view->setViewport(scaled.scaled(1.0 / backendOutput->scale()));
