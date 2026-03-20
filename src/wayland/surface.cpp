@@ -711,6 +711,12 @@ void SurfaceInterfacePrivate::applyState(SurfaceState *next)
         // fifo barriers on an unmapped surface would never be cleared
         current->fifoBarrier = false;
     }
+    if (subsurface.handle) {
+        SurfaceInterface *main = subsurface.handle->mainSurface();
+        if (main && !main->isMapped()) {
+            current->fifoBarrier = false;
+        }
+    }
     scaleOverride = pendingScaleOverride;
 
     if (current->buffer) {
