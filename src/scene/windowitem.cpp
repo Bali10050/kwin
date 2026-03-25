@@ -238,6 +238,9 @@ void WindowItem::updateSurfacePosition()
 
 void WindowItem::updateBorderRadius()
 {
+    if (m_window->borderRadius().floatingTitlebar())
+    m_surfaceItem->setBorderRadius(m_window->borderRadius());
+    else
     m_windowContainer->setBorderRadius(m_window->borderRadius());
 }
 

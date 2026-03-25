@@ -25,6 +25,7 @@ public:
     BorderRadius();
     explicit BorderRadius(qreal radius);
     explicit BorderRadius(qreal topLeft, qreal topRight, qreal bottomRight, qreal bottomLeft);
+    explicit BorderRadius(qreal topLeft, qreal topRight, qreal bottomRight, qreal bottomLeft, bool floatingTitlebar);
 
     bool operator<=>(const BorderRadius &other) const = default;
 
@@ -34,6 +35,7 @@ public:
     qreal bottomLeft() const;
     qreal topRight() const;
     qreal bottomRight() const;
+    bool floatingTitlebar() const;
 
     bool clips(const RectF &rect, const RectF &bounds) const;
     Region clip(const Region &region, const RectF &bounds) const;
@@ -50,6 +52,7 @@ private:
     qreal m_topRight = 0;
     qreal m_bottomRight = 0;
     qreal m_bottomLeft = 0;
+    qreal m_floatingTitlebar = false;
 };
 
 } // namespace KWin

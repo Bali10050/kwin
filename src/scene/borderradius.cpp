@@ -20,6 +20,7 @@ BorderRadius::BorderRadius(qreal radius)
     , m_topRight(radius)
     , m_bottomRight(radius)
     , m_bottomLeft(radius)
+    , m_floatingTitlebar(false)
 {
 }
 
@@ -28,6 +29,16 @@ BorderRadius::BorderRadius(qreal topLeft, qreal topRight, qreal bottomRight, qre
     , m_topRight(topRight)
     , m_bottomRight(bottomRight)
     , m_bottomLeft(bottomLeft)
+    , m_floatingTitlebar(false)
+{
+}
+
+BorderRadius::BorderRadius(qreal topLeft, qreal topRight, qreal bottomRight, qreal bottomLeft, bool floatingTitlebar)
+: m_topLeft(topLeft)
+, m_topRight(topRight)
+, m_bottomRight(bottomRight)
+, m_bottomLeft(bottomLeft)
+, m_floatingTitlebar(floatingTitlebar)
 {
 }
 
@@ -54,6 +65,11 @@ qreal BorderRadius::topRight() const
 qreal BorderRadius::bottomRight() const
 {
     return m_bottomRight;
+}
+
+bool BorderRadius::floatingTitlebar() const
+{
+    return m_floatingTitlebar;
 }
 
 BorderRadius BorderRadius::scaled(qreal scale) const
@@ -126,7 +142,7 @@ Region BorderRadius::clip(const Region &region, const RectF &bounds) const
 
 BorderRadius BorderRadius::from(const KDecoration3::BorderRadius &radius)
 {
-    return BorderRadius(radius.topLeft(), radius.topRight(), radius.bottomRight(), radius.bottomLeft());
+    return BorderRadius(radius.topLeft(), radius.topRight(), radius.bottomRight(), radius.bottomLeft(), radius.floatingTitlebar());
 }
 
 } // namespace KWin
