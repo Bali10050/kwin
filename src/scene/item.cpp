@@ -705,8 +705,9 @@ void Item::framePainted(RenderView *view, LogicalOutput *output, OutputFrame *fr
     // The visibility of the item itself is not checked here to be able to paint hidden items for
     // things like screncasts or thumbnails
     handleFramePainted(output, frame, timestamp);
-    for (const auto child : std::as_const(m_childItems)) {
-        if (child->explicitVisible() && workspace()->outputAt(child->mapToScene(child->boundingRect()).center()) == output) {
+    const QList<QPointer<Item>> children(m_childItems.begin(), m_childItems.end());
+    for (const auto &child : children) {
+        if (child && child->explicitVisible() && workspace()->outputAt(child->mapToScene(child->boundingRect()).center()) == output) {
             child->framePainted(view, output, frame, timestamp);
         }
     }
