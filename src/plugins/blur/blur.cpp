@@ -15,6 +15,7 @@
 #include "core/renderviewport.h"
 #include "effect/effecthandler.h"
 #include "opengl/glplatform.h"
+#include "scene/backgroundeffectitem.h"
 #include "scene/decorationitem.h"
 #include "scene/scene.h"
 #include "scene/surfaceitem.h"
@@ -293,6 +294,9 @@ void BlurEffect::reconfigure(ReconfigureFlags flags)
     m_expandSize = blurOffsets[m_iterationCount - 1].expandSize;
     m_noiseStrength = BlurConfig::noiseStrength();
     m_colorMatrix = colorTransformMatrix(BlurConfig::saturation() / 100.0, 1.0);
+    for (auto &[window, data] : m_windows) {
+        data.blurItem->setPixelsToExpandRepaintsBelowOpaqueRegions(m_expandSize);
+    }
 
     // Update all windows for the blur to take effect
     effects->addRepaintFull();
@@ -355,7 +359,11 @@ void BlurEffect::updateBlurRegion(EffectWindow *w)
         } else {
             data.colorMatrix.reset();
         }
-        data.windowEffect = ItemEffect(w->windowItem());
+        if (!data.blurItem) {
+            data.blurItem = std::make_unique<BackgroundEffectItem>(w->windowItem());
+        }
+        data.blurItem->setPixelsToExpandRepaintsBelowOpaqueRegions(m_expandSize);
+        data.blurItem->setEffectBoundingRect(blurRegion(w).boundingRect());
     } else {
         if (auto it = m_windows.find(w); it != m_windows.end()) {
             effects->makeOpenGLContextCurrent();
@@ -523,56 +531,9 @@ Region BlurEffect::blurRegion(EffectWindow *w) const
 
 void BlurEffect::prePaintScreen(ScreenPrePaintData &data, std::chrono::milliseconds presentTime)
 {
-    m_paintedDeviceArea = Region();
-    m_currentDeviceBlur = Region();
     m_currentView = data.view;
 
     effects->prePaintScreen(data, presentTime);
-}
-
-void BlurEffect::prePaintWindow(RenderView *view, EffectWindow *w, WindowPrePaintData &data, std::chrono::milliseconds presentTime)
-{
-    // this effect relies on prePaintWindow being called in the bottom to top order
-
-    effects->prePaintWindow(view, w, data, presentTime);
-
-    const Region oldOpaque = data.deviceOpaque;
-    if (data.deviceOpaque.intersects(m_currentDeviceBlur)) {
-        // to blur an area partially we have to shrink the opaque area of a window
-        Region newOpaque;
-        for (const Rect &rect : data.deviceOpaque.rects()) {
-            newOpaque += rect.adjusted(m_expandSize, m_expandSize, -m_expandSize, -m_expandSize);
-        }
-        data.deviceOpaque = newOpaque;
-
-        // we don't have to blur a region we don't see
-        m_currentDeviceBlur -= newOpaque;
-    }
-
-    // if we have to paint a non-opaque part of this window that intersects with the
-    // currently blurred region we have to redraw the whole region
-    if ((data.devicePaint - oldOpaque).intersects(m_currentDeviceBlur)) {
-        data.devicePaint += m_currentDeviceBlur;
-    }
-
-    // in case this window has regions to be blurred
-    const Region blurArea = view->mapToDeviceCoordinatesAligned(QRectF(blurRegion(w).boundingRect()).translated(w->pos()));
-
-    // if this window or a window underneath the blurred area is painted again we have to
-    // blur everything
-    if (m_paintedDeviceArea.intersects(blurArea) || data.devicePaint.intersects(blurArea)) {
-        data.devicePaint += blurArea;
-        // we have to check again whether we do not damage a blurred area
-        // of a window
-        if (blurArea.intersects(m_currentDeviceBlur)) {
-            data.devicePaint += m_currentDeviceBlur;
-        }
-    }
-
-    m_currentDeviceBlur += blurArea;
-
-    m_paintedDeviceArea -= data.deviceOpaque;
-    m_paintedDeviceArea += data.devicePaint;
 }
 
 bool BlurEffect::shouldBlur(const EffectWindow *w, int mask, const WindowPaintData &data) const
@@ -696,6 +657,43 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
         return;
     }
 
+    // Determine whether the decoration uses a floating titlebar. If so, we need to
+    // render two separate blurs: one for the titlebar area (flat) and one for the
+    // surface area (rounded corners).
+    const bool hasFloatingTitlebar = w->window()->decoration()
+    && w->window()->decoration()->floatingTitlebar();
+
+    QList<RectF> titlebарShape;
+    QList<RectF> surfaceShape;
+
+    if (hasFloatingTitlebar) {
+        const QRectF clientRect = QRectF(w->window()->clientGeometry());
+        const QRectF transformedClient = QRectF{
+            clientRect.x() + data.xTranslation(),
+            clientRect.y() + data.yTranslation(),
+            clientRect.width()  * data.xScale(),
+            clientRect.height() * data.yScale(),
+        };
+        const QRectF scaledClientRect = snapToPixelGridF(scaledRect(transformedClient, viewport.scale()))
+        .translated(-scaledBackgroundRect.topLeft());
+
+        for (const RectF &rect : effectiveShape) {
+            // Surface part: intersection with the client (surface) area.
+            if (const QRectF s = QRectF(rect).intersected(scaledClientRect); !s.isEmpty()) {
+                surfaceShape.append(s);
+            }
+            // Titlebar part: the strip above the client area.
+            if (scaledClientRect.top() > rect.top()) {
+                const QRectF t(rect.left(), rect.top(),
+                               rect.width(),
+                               std::min(rect.bottom(), scaledClientRect.top()) - rect.top());
+                if (!t.isEmpty()) {
+                    titlebарShape.append(t);
+                }
+            }
+        }
+    }
+
     // Maybe reallocate offscreen render targets. Keep in mind that the first one contains
     // original background behind the window, it's not blurred.
     GLenum textureFormat = GL_RGBA8;
@@ -736,14 +734,19 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
         renderInfo.framebuffers[0]->blitFromRenderTarget(renderTarget, viewport, dirtyRect, dirtyRect.translated(-backgroundRect.topLeft()));
     }
 
-    // Upload the geometry: the first 6 vertices are used when downsampling and upsampling offscreen,
-    // the remaining vertices are used when rendering on the screen.
+    // Upload the geometry:
+    //   [0..5]                                     — offscreen quad (down/upsample passes)
+    //   [6..6+titlebарVertexCount-1]               — titlebar onscreen geometry (floating titlebar only)
+    //   [6+titlebарVertexCount..6+totalVertexCount] — surface (or full shape) onscreen geometry
     GLVertexBuffer *vbo = GLVertexBuffer::streamingBuffer();
     vbo->reset();
     vbo->setAttribLayout(std::span(GLVertexBuffer::GLVertex2DLayout), sizeof(GLVertex2D));
 
-    const int vertexCount = effectiveShape.size() * 6;
-    if (auto result = vbo->map<GLVertex2D>(6 + vertexCount)) {
+    const int titlebарVertexCount = hasFloatingTitlebar ? titlebарShape.size() * 6 : 0;
+    const int surfaceVertexCount  = hasFloatingTitlebar ? surfaceShape.size()  * 6 : effectiveShape.size() * 6;
+    const int totalVertexCount    = titlebарVertexCount + surfaceVertexCount;
+
+    if (auto result = vbo->map<GLVertex2D>(6 + totalVertexCount)) {
         auto map = *result;
 
         size_t vboIndex = 0;
@@ -763,36 +766,17 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
             const float v1 = 1.0f - y1 / backgroundRect.height();
 
             // first triangle
-            map[vboIndex++] = GLVertex2D{
-                .position = QVector2D(x0, y0),
-                .texcoord = QVector2D(u0, v0),
-            };
-            map[vboIndex++] = GLVertex2D{
-                .position = QVector2D(x1, y1),
-                .texcoord = QVector2D(u1, v1),
-            };
-            map[vboIndex++] = GLVertex2D{
-                .position = QVector2D(x0, y1),
-                .texcoord = QVector2D(u0, v1),
-            };
-
+            map[vboIndex++] = GLVertex2D{ .position = QVector2D(x0, y0), .texcoord = QVector2D(u0, v0) };
+            map[vboIndex++] = GLVertex2D{ .position = QVector2D(x1, y1), .texcoord = QVector2D(u1, v1) };
+            map[vboIndex++] = GLVertex2D{ .position = QVector2D(x0, y1), .texcoord = QVector2D(u0, v1) };
             // second triangle
-            map[vboIndex++] = GLVertex2D{
-                .position = QVector2D(x0, y0),
-                .texcoord = QVector2D(u0, v0),
-            };
-            map[vboIndex++] = GLVertex2D{
-                .position = QVector2D(x1, y0),
-                .texcoord = QVector2D(u1, v0),
-            };
-            map[vboIndex++] = GLVertex2D{
-                .position = QVector2D(x1, y1),
-                .texcoord = QVector2D(u1, v1),
-            };
+            map[vboIndex++] = GLVertex2D{ .position = QVector2D(x0, y0), .texcoord = QVector2D(u0, v0) };
+            map[vboIndex++] = GLVertex2D{ .position = QVector2D(x1, y0), .texcoord = QVector2D(u1, v0) };
+            map[vboIndex++] = GLVertex2D{ .position = QVector2D(x1, y1), .texcoord = QVector2D(u1, v1) };
         }
 
-        // The geometry that will be painted on screen, in device pixels.
-        for (const QRectF &rect : effectiveShape) {
+        // Helper lambda to emit two triangles for a screen-space rect.
+        auto emitRect = [&](const QRectF &rect) {
             const float x0 = rect.left();
             const float y0 = rect.top();
             const float x1 = rect.right();
@@ -803,33 +787,25 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
             const float u1 = x1 / scaledBackgroundRect.width();
             const float v1 = 1.0f - y1 / scaledBackgroundRect.height();
 
-            // first triangle
-            map[vboIndex++] = GLVertex2D{
-                .position = QVector2D(x0, y0),
-                .texcoord = QVector2D(u0, v0),
-            };
-            map[vboIndex++] = GLVertex2D{
-                .position = QVector2D(x1, y1),
-                .texcoord = QVector2D(u1, v1),
-            };
-            map[vboIndex++] = GLVertex2D{
-                .position = QVector2D(x0, y1),
-                .texcoord = QVector2D(u0, v1),
-            };
+            map[vboIndex++] = GLVertex2D{ .position = QVector2D(x0, y0), .texcoord = QVector2D(u0, v0) };
+            map[vboIndex++] = GLVertex2D{ .position = QVector2D(x1, y1), .texcoord = QVector2D(u1, v1) };
+            map[vboIndex++] = GLVertex2D{ .position = QVector2D(x0, y1), .texcoord = QVector2D(u0, v1) };
+            map[vboIndex++] = GLVertex2D{ .position = QVector2D(x0, y0), .texcoord = QVector2D(u0, v0) };
+            map[vboIndex++] = GLVertex2D{ .position = QVector2D(x1, y0), .texcoord = QVector2D(u1, v0) };
+            map[vboIndex++] = GLVertex2D{ .position = QVector2D(x1, y1), .texcoord = QVector2D(u1, v1) };
+        };
 
-            // second triangle
-            map[vboIndex++] = GLVertex2D{
-                .position = QVector2D(x0, y0),
-                .texcoord = QVector2D(u0, v0),
-            };
-            map[vboIndex++] = GLVertex2D{
-                .position = QVector2D(x1, y0),
-                .texcoord = QVector2D(u1, v0),
-            };
-            map[vboIndex++] = GLVertex2D{
-                .position = QVector2D(x1, y1),
-                .texcoord = QVector2D(u1, v1),
-            };
+        // Titlebar geometry first (only when floating titlebar is active).
+        if (hasFloatingTitlebar) {
+            for (const RectF &rect : titlebарShape) {
+                emitRect(QRectF(rect));
+            }
+        }
+
+        // Surface (or full shape) geometry.
+        const QList<RectF> &onscreenShape = hasFloatingTitlebar ? surfaceShape : effectiveShape;
+        for (const RectF &rect : onscreenShape) {
+            emitRect(QRectF(rect));
         }
 
         vbo->unmap();
@@ -896,64 +872,25 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
     const QMatrix4x4 &colorMatrix = blurInfo.colorMatrix ? *blurInfo.colorMatrix : m_colorMatrix;
     const float modulation = opacity * opacity;
 
-    if (const BorderRadius cornerRadius = w->window()->borderRadius(); !cornerRadius.isNull()) {
-        ShaderManager::instance()->pushShader(m_roundedOnscreenPass.shader.get());
+    GLFramebuffer::popFramebuffer();
+    const auto &read = renderInfo.framebuffers[1];
+    const QVector2D halfpixel(0.5 / read->colorAttachment()->width(),
+                              0.5 / read->colorAttachment()->height());
 
-        QMatrix4x4 projectionMatrix = viewport.projectionMatrix();
-        projectionMatrix.translate(scaledBackgroundRect.x(), scaledBackgroundRect.y());
+    read->colorAttachment()->bind();
 
-        GLFramebuffer::popFramebuffer();
-        const auto &read = renderInfo.framebuffers[1];
+    QMatrix4x4 projectionMatrix = viewport.projectionMatrix();
+    projectionMatrix.translate(scaledBackgroundRect.x(), scaledBackgroundRect.y());
 
-        const QVector2D halfpixel(0.5 / read->colorAttachment()->width(),
-                                  0.5 / read->colorAttachment()->height());
-
-        const QRectF transformedRect = QRectF{
-            w->frameGeometry().x() + data.xTranslation(),
-            w->frameGeometry().y() + data.yTranslation(),
-            w->frameGeometry().width() * data.xScale(),
-            w->frameGeometry().height() * data.yScale(),
-        };
-        const QRectF nativeBox = snapToPixelGridF(scaledRect(transformedRect, viewport.scale()))
-                                     .translated(-scaledBackgroundRect.topLeft());
-        const BorderRadius nativeCornerRadius = cornerRadius.scaled(viewport.scale()).rounded();
-
-        m_roundedOnscreenPass.shader->setUniform(m_roundedOnscreenPass.mvpMatrixLocation, projectionMatrix);
-        m_roundedOnscreenPass.shader->setUniform(m_roundedOnscreenPass.colorMatrixLocation, colorMatrix);
-        m_roundedOnscreenPass.shader->setUniform(m_roundedOnscreenPass.halfpixelLocation, halfpixel);
-        m_roundedOnscreenPass.shader->setUniform(m_roundedOnscreenPass.offsetLocation, float(m_offset));
-        m_roundedOnscreenPass.shader->setUniform(m_roundedOnscreenPass.boxLocation, QVector4D(nativeBox.x() + nativeBox.width() * 0.5, nativeBox.y() + nativeBox.height() * 0.5, nativeBox.width() * 0.5, nativeBox.height() * 0.5));
-        m_roundedOnscreenPass.shader->setUniform(m_roundedOnscreenPass.cornerRadiusLocation, nativeCornerRadius.toVector());
-        m_roundedOnscreenPass.shader->setUniform(m_roundedOnscreenPass.opacityLocation, modulation);
-
-        read->colorAttachment()->bind();
-
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-
-        vbo->draw(GL_TRIANGLES, 6, vertexCount);
-
-        glDisable(GL_BLEND);
-
-        ShaderManager::instance()->popShader();
-    } else {
+    // --- Titlebar pass (flat, no corner rounding) ---
+    // Only drawn when a floating titlebar is present and there is titlebar geometry.
+    if (hasFloatingTitlebar && titlebарVertexCount > 0) {
         ShaderManager::instance()->pushShader(m_onscreenPass.shader.get());
-
-        QMatrix4x4 projectionMatrix = viewport.projectionMatrix();
-        projectionMatrix.translate(scaledBackgroundRect.x(), scaledBackgroundRect.y());
-
-        GLFramebuffer::popFramebuffer();
-        const auto &read = renderInfo.framebuffers[1];
-
-        const QVector2D halfpixel(0.5 / read->colorAttachment()->width(),
-                                  0.5 / read->colorAttachment()->height());
 
         m_onscreenPass.shader->setUniform(m_onscreenPass.mvpMatrixLocation, projectionMatrix);
         m_onscreenPass.shader->setUniform(m_onscreenPass.colorMatrixLocation, colorMatrix);
         m_onscreenPass.shader->setUniform(m_onscreenPass.halfpixelLocation, halfpixel);
         m_onscreenPass.shader->setUniform(m_onscreenPass.offsetLocation, float(m_offset));
-
-        read->colorAttachment()->bind();
 
         if (modulation < 1.0) {
             glEnable(GL_BLEND);
@@ -961,7 +898,76 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
             glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA);
         }
 
-        vbo->draw(GL_TRIANGLES, 6, vertexCount);
+        // Titlebar verts start at index 6.
+        vbo->draw(GL_TRIANGLES, 6, titlebарVertexCount);
+
+        if (modulation < 1.0) {
+            glDisable(GL_BLEND);
+        }
+
+        ShaderManager::instance()->popShader();
+    }
+
+    // --- Surface / main pass (rounded corners if applicable) ---
+    // Surface verts start after the titlebar verts.
+    const int surfaceVboOffset = 6 + titlebарVertexCount;
+
+    const BorderRadius cornerRadius = w->window()->borderRadius();
+    if (!cornerRadius.isNull()) {
+        ShaderManager::instance()->pushShader(m_roundedOnscreenPass.shader.get());
+
+        // Use the client geometry as the rounding box when a floating titlebar is
+        // present, so the rounded corners align with the surface item rather than
+        // the full frame (which would offset them into the titlebar area).
+        const QRectF sourceRect = hasFloatingTitlebar
+        ? QRectF(w->window()->clientGeometry())
+        : w->frameGeometry();
+
+        const QRectF transformedRect = QRectF{
+            sourceRect.x() + data.xTranslation(),
+            sourceRect.y() + data.yTranslation(),
+            sourceRect.width()  * data.xScale(),
+            sourceRect.height() * data.yScale(),
+        };
+        const QRectF nativeBox = snapToPixelGridF(scaledRect(transformedRect, viewport.scale()))
+        .translated(-scaledBackgroundRect.topLeft());
+        const BorderRadius nativeCornerRadius = cornerRadius.scaled(viewport.scale()).rounded();
+
+        m_roundedOnscreenPass.shader->setUniform(m_roundedOnscreenPass.mvpMatrixLocation, projectionMatrix);
+        m_roundedOnscreenPass.shader->setUniform(m_roundedOnscreenPass.colorMatrixLocation, colorMatrix);
+        m_roundedOnscreenPass.shader->setUniform(m_roundedOnscreenPass.halfpixelLocation, halfpixel);
+        m_roundedOnscreenPass.shader->setUniform(m_roundedOnscreenPass.offsetLocation, float(m_offset));
+        m_roundedOnscreenPass.shader->setUniform(m_roundedOnscreenPass.boxLocation,
+                                                 QVector4D(nativeBox.x() + nativeBox.width() * 0.5,
+                                                           nativeBox.y() + nativeBox.height() * 0.5,
+                                                           nativeBox.width()  * 0.5,
+                                                           nativeBox.height() * 0.5));
+        m_roundedOnscreenPass.shader->setUniform(m_roundedOnscreenPass.cornerRadiusLocation, nativeCornerRadius.toVector());
+        m_roundedOnscreenPass.shader->setUniform(m_roundedOnscreenPass.opacityLocation, modulation);
+
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+
+        vbo->draw(GL_TRIANGLES, surfaceVboOffset, surfaceVertexCount);
+
+        glDisable(GL_BLEND);
+
+        ShaderManager::instance()->popShader();
+    } else {
+        ShaderManager::instance()->pushShader(m_onscreenPass.shader.get());
+
+        m_onscreenPass.shader->setUniform(m_onscreenPass.mvpMatrixLocation, projectionMatrix);
+        m_onscreenPass.shader->setUniform(m_onscreenPass.colorMatrixLocation, colorMatrix);
+        m_onscreenPass.shader->setUniform(m_onscreenPass.halfpixelLocation, halfpixel);
+        m_onscreenPass.shader->setUniform(m_onscreenPass.offsetLocation, float(m_offset));
+
+        if (modulation < 1.0) {
+            glEnable(GL_BLEND);
+            glBlendColor(0, 0, 0, modulation);
+            glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA);
+        }
+
+        vbo->draw(GL_TRIANGLES, surfaceVboOffset, surfaceVertexCount);
 
         if (modulation < 1.0) {
             glDisable(GL_BLEND);
@@ -984,15 +990,16 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
         if (GLTexture *noiseTexture = ensureNoiseTexture()) {
             ShaderManager::instance()->pushShader(m_noisePass.shader.get());
 
-            QMatrix4x4 projectionMatrix = viewport.projectionMatrix();
-            projectionMatrix.translate(scaledBackgroundRect.x(), scaledBackgroundRect.y());
+            QMatrix4x4 noiseProjMatrix = viewport.projectionMatrix();
+            noiseProjMatrix.translate(scaledBackgroundRect.x(), scaledBackgroundRect.y());
 
-            m_noisePass.shader->setUniform(m_noisePass.mvpMatrixLocation, projectionMatrix);
+            m_noisePass.shader->setUniform(m_noisePass.mvpMatrixLocation, noiseProjMatrix);
             m_noisePass.shader->setUniform(m_noisePass.noiseTextureSizeLocation, QVector2D(noiseTexture->width(), noiseTexture->height()));
 
             noiseTexture->bind();
 
-            vbo->draw(GL_TRIANGLES, 6, vertexCount);
+            // Apply noise over both titlebar and surface regions.
+            vbo->draw(GL_TRIANGLES, 6, totalVertexCount);
 
             ShaderManager::instance()->popShader();
         }
