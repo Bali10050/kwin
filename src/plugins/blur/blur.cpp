@@ -154,6 +154,19 @@ BlurEffect::BlurEffect()
         m_noisePass.noiseTextureSizeLocation = m_noisePass.shader->uniformLocation("noiseTextureSize");
     }
 
+    m_roundedNoisePass.shader = ShaderManager::instance()->generateShaderFromFile(ShaderTrait::MapTexture,
+                                                                                  QStringLiteral(":/effects/blur/shaders/onscreen_rounded.vert"),
+                                                                                  QStringLiteral(":/effects/blur/shaders/noise_rounded.frag"));
+    if (!m_roundedNoisePass.shader) {
+        qCWarning(KWIN_BLUR) << "Failed to load rounded noise pass shader";
+        return;
+    } else {
+        m_roundedNoisePass.mvpMatrixLocation = m_roundedNoisePass.shader->uniformLocation("modelViewProjectionMatrix");
+        m_roundedNoisePass.noiseTextureSizeLocation = m_roundedNoisePass.shader->uniformLocation("noiseTextureSize");
+        m_roundedNoisePass.boxLocation = m_roundedNoisePass.shader->uniformLocation("box");
+        m_roundedNoisePass.cornerRadiusLocation = m_roundedNoisePass.shader->uniformLocation("cornerRadius");
+    }
+
     initBlurStrengthValues();
     reconfigure(ReconfigureAll);
 
@@ -600,6 +613,42 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
         return;
     }
 
+    const bool hasFloatingTitlebar = w->window()->decoration()
+    && w->window()->decoration()->floatingTitlebar();
+
+    // With a floating titlebar, effectiveShape becomes [titlebar rects][surface rects] so the two
+    // parts can be drawn with different shaders from the same vertex buffer.
+    RectF scaledClientRect;
+    int titlebarVertexCount = 0;
+
+    if (hasFloatingTitlebar) {
+        // Same transform as the blur shape: scale about the window origin, translate, move to w->pos().
+        const auto contents = w->contentsRect(); // client area, relative to the frame (as in blurRegion())
+        scaledClientRect = RectF{
+            w->pos().x() + data.xTranslation() + contents.x() * data.xScale(),
+            w->pos().y() + data.yTranslation() + contents.y() * data.yScale(),
+            contents.width() * data.xScale(),
+            contents.height() * data.yScale(),
+        }.translated(-backgroundRect.topLeft()).scaled(viewport.scale()).rounded();
+
+        QList<RectF> titlebarShape;
+        QList<RectF> surfaceShape;
+        for (const RectF &rect : effectiveShape) {
+            if (const RectF s = rect.intersected(scaledClientRect); !s.isEmpty()) {
+                surfaceShape.append(s);
+            }
+            if (scaledClientRect.top() > rect.top()) {
+                const RectF t(rect.left(), rect.top(), rect.width(),
+                              std::min(rect.bottom(), scaledClientRect.top()) - rect.top());
+                if (!t.isEmpty()) {
+                    titlebarShape.append(t);
+                }
+            }
+        }
+        titlebarVertexCount = titlebarShape.size() * 6;
+        effectiveShape = titlebarShape + surfaceShape;
+    }
+
     // Maybe reallocate offscreen render targets. Keep in mind that the first one contains
     // original background behind the window, it's not blurred.
     GLenum textureFormat = GL_RGBA8;
@@ -799,7 +848,34 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
 
     const float modulation = opacity * opacity;
 
-    if (const BorderRadius cornerRadius = w->window()->borderRadius(); !cornerRadius.isNull()) {
+    // The rounded box that the blurred surface is clipped to. The noise pass below has to be
+    // clipped to the very same box, otherwise it would show up in the cut-off corners.
+    const BorderRadius cornerRadius = w->window()->borderRadius();
+    const bool isRounded = !cornerRadius.isNull();
+    QVector4D boxUniform;
+    QVector4D cornerRadiusUniform;
+    if (isRounded) {
+        RectF nativeBox;
+        if (hasFloatingTitlebar) {
+            // Only the client area is rounded, the titlebar floats above it.
+            nativeBox = scaledClientRect;
+        } else {
+            const RectF transformedRect = RectF{
+                w->frameGeometry().x() + data.xTranslation(),
+                w->frameGeometry().y() + data.yTranslation(),
+                w->frameGeometry().width() * data.xScale(),
+                w->frameGeometry().height() * data.yScale(),
+            };
+            nativeBox = transformedRect
+                            .scaled(viewport.scale())
+                            .rounded()
+                            .translated(-scaledBackgroundRect.topLeft());
+        }
+        boxUniform = QVector4D(nativeBox.horizontalCenter(), nativeBox.verticalCenter(), nativeBox.width() * 0.5, nativeBox.height() * 0.5);
+        cornerRadiusUniform = cornerRadius.scaled(viewport.scale()).rounded().toVector();
+    }
+
+    if (isRounded) {
         ShaderManager::instance()->pushShader(m_roundedOnscreenPass.shader.get());
 
         QMatrix4x4 projectionMatrix = viewport.projectionMatrix();
@@ -811,24 +887,38 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
         const QVector2D halfpixel(0.5 / read->colorAttachment()->width(),
                                   0.5 / read->colorAttachment()->height());
 
-        const RectF transformedRect = RectF{
-            w->frameGeometry().x() + data.xTranslation(),
-            w->frameGeometry().y() + data.yTranslation(),
-            w->frameGeometry().width() * data.xScale(),
-            w->frameGeometry().height() * data.yScale(),
-        };
-        const RectF nativeBox = transformedRect
-                                    .scaled(viewport.scale())
-                                    .rounded()
-                                    .translated(-scaledBackgroundRect.topLeft());
-        const BorderRadius nativeCornerRadius = cornerRadius.scaled(viewport.scale()).rounded();
+        if (hasFloatingTitlebar && titlebarVertexCount > 0) {
+            ShaderManager::instance()->pushShader(m_onscreenPass.shader.get());
+
+            m_onscreenPass.shader->setUniform(m_onscreenPass.mvpMatrixLocation, projectionMatrix);
+            m_onscreenPass.shader->setUniform(m_onscreenPass.colorMatrixLocation, m_colorMatrix);
+            m_onscreenPass.shader->setUniform(m_onscreenPass.halfpixelLocation, halfpixel);
+            m_onscreenPass.shader->setUniform(m_onscreenPass.offsetLocation, float(m_offset));
+
+            read->colorAttachment()->bind();
+
+            if (modulation < 1.0) {
+                glEnable(GL_BLEND);
+                glBlendColor(0, 0, 0, modulation);
+                glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA);
+            }
+
+            // Titlebar verts start at index 6.
+            vbo->draw(GL_TRIANGLES, 6, titlebarVertexCount);
+
+            if (modulation < 1.0) {
+                glDisable(GL_BLEND);
+            }
+
+            ShaderManager::instance()->popShader();
+        }
 
         m_roundedOnscreenPass.shader->setUniform(m_roundedOnscreenPass.mvpMatrixLocation, projectionMatrix);
         m_roundedOnscreenPass.shader->setUniform(m_roundedOnscreenPass.colorMatrixLocation, m_colorMatrix);
         m_roundedOnscreenPass.shader->setUniform(m_roundedOnscreenPass.halfpixelLocation, halfpixel);
         m_roundedOnscreenPass.shader->setUniform(m_roundedOnscreenPass.offsetLocation, float(m_offset));
-        m_roundedOnscreenPass.shader->setUniform(m_roundedOnscreenPass.boxLocation, QVector4D(nativeBox.horizontalCenter(), nativeBox.verticalCenter(), nativeBox.width() * 0.5, nativeBox.height() * 0.5));
-        m_roundedOnscreenPass.shader->setUniform(m_roundedOnscreenPass.cornerRadiusLocation, nativeCornerRadius.toVector());
+        m_roundedOnscreenPass.shader->setUniform(m_roundedOnscreenPass.boxLocation, boxUniform);
+        m_roundedOnscreenPass.shader->setUniform(m_roundedOnscreenPass.cornerRadiusLocation, cornerRadiusUniform);
         m_roundedOnscreenPass.shader->setUniform(m_roundedOnscreenPass.opacityLocation, modulation);
 
         read->colorAttachment()->bind();
@@ -836,7 +926,8 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
         glEnable(GL_BLEND);
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
-        vbo->draw(GL_TRIANGLES, 6, vertexCount);
+        // Surface verts follow the titlebar verts (titlebarVertexCount is 0 without a floating titlebar).
+        vbo->draw(GL_TRIANGLES, 6 + titlebarVertexCount, vertexCount - titlebarVertexCount);
 
         glDisable(GL_BLEND);
 
@@ -887,19 +978,42 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
         }
 
         if (GLTexture *noiseTexture = ensureNoiseTexture()) {
-            ShaderManager::instance()->pushShader(m_noisePass.shader.get());
-
             QMatrix4x4 projectionMatrix = viewport.projectionMatrix();
             projectionMatrix.translate(scaledBackgroundRect.x(), scaledBackgroundRect.y());
 
-            m_noisePass.shader->setUniform(m_noisePass.mvpMatrixLocation, projectionMatrix);
-            m_noisePass.shader->setUniform(m_noisePass.noiseTextureSizeLocation, QVector2D(noiseTexture->width(), noiseTexture->height()));
+            const QVector2D noiseTextureSize(noiseTexture->width(), noiseTexture->height());
 
             noiseTexture->bind();
 
-            vbo->draw(GL_TRIANGLES, 6, vertexCount);
+            // After the first 6 vertices, the geometry is laid out as [titlebar][surface]. Like the
+            // blur, the noise of a rounded window is clipped to the rounded box, but only for the
+            // surface; the titlebar and windows without rounded corners get plain noise.
+            const int plainVertexCount = isRounded ? titlebarVertexCount : vertexCount;
+            const int roundedVertexCount = vertexCount - plainVertexCount;
 
-            ShaderManager::instance()->popShader();
+            if (plainVertexCount > 0) {
+                ShaderManager::instance()->pushShader(m_noisePass.shader.get());
+
+                m_noisePass.shader->setUniform(m_noisePass.mvpMatrixLocation, projectionMatrix);
+                m_noisePass.shader->setUniform(m_noisePass.noiseTextureSizeLocation, noiseTextureSize);
+
+                vbo->draw(GL_TRIANGLES, 6, plainVertexCount);
+
+                ShaderManager::instance()->popShader();
+            }
+
+            if (roundedVertexCount > 0) {
+                ShaderManager::instance()->pushShader(m_roundedNoisePass.shader.get());
+
+                m_roundedNoisePass.shader->setUniform(m_roundedNoisePass.mvpMatrixLocation, projectionMatrix);
+                m_roundedNoisePass.shader->setUniform(m_roundedNoisePass.noiseTextureSizeLocation, noiseTextureSize);
+                m_roundedNoisePass.shader->setUniform(m_roundedNoisePass.boxLocation, boxUniform);
+                m_roundedNoisePass.shader->setUniform(m_roundedNoisePass.cornerRadiusLocation, cornerRadiusUniform);
+
+                vbo->draw(GL_TRIANGLES, 6 + plainVertexCount, roundedVertexCount);
+
+                ShaderManager::instance()->popShader();
+            }
         }
 
         glDisable(GL_BLEND);

@@ -140,6 +140,16 @@ private:
         int noiseTextureStength = 0;
     } m_noisePass;
 
+    // Same noise as m_noisePass (and it shares its noise texture), but clipped to a rounded box.
+    struct
+    {
+        std::unique_ptr<GLShader> shader;
+        int mvpMatrixLocation;
+        int noiseTextureSizeLocation;
+        int boxLocation;
+        int cornerRadiusLocation;
+    } m_roundedNoisePass;
+
     bool m_valid = false;
 #if KWIN_BUILD_X11
     long net_wm_blur_region = 0;

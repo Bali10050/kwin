@@ -2,6 +2,7 @@
 <qresource prefix="/effects/blur/">
   <file>shaders/downsample.frag</file>
   <file>shaders/noise.frag</file>
+  <file>shaders/noise_rounded.frag</file>
   <file>shaders/onscreen.frag</file>
   <file>shaders/onscreen_rounded.frag</file>
   <file>shaders/onscreen_rounded.vert</file>
