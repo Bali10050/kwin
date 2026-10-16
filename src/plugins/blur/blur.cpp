@@ -857,7 +857,6 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
     if (isRounded) {
         RectF nativeBox;
         if (hasFloatingTitlebar) {
-            // Only the client area is rounded, the titlebar floats above it.
             nativeBox = scaledClientRect;
         } else {
             const RectF transformedRect = RectF{
