@@ -614,9 +614,9 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
     }
 
     const bool hasBorderRadiusOnContent = w->window()->decoration()
-    && w->window()->decoration()->floatingTitlebar();
+    && w->window()->decoration()->borderRadiusOnContent();
 
-    // With a floating titlebar, effectiveShape becomes [titlebar rects][surface rects] so the two
+    // With a floating titlebar (borderRadiusOnContent), effectiveShape becomes [titlebar rects][surface rects] so the two
     // parts can be drawn with different shaders from the same vertex buffer.
     RectF scaledClientRect;
     int titlebarVertexCount = 0;
@@ -925,7 +925,7 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
         glEnable(GL_BLEND);
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
-        // Surface verts follow the titlebar verts (titlebarVertexCount is 0 without a floating titlebar).
+        // Surface verts follow the titlebar verts (titlebarVertexCount is 0 without a floating titlebar(borderRadiusOnContent)).
         vbo->draw(GL_TRIANGLES, 6 + titlebarVertexCount, vertexCount - titlebarVertexCount);
 
         glDisable(GL_BLEND);
