@@ -613,7 +613,7 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
         return;
     }
 
-    const bool hasFloatingTitlebar = w->window()->decoration()
+    const bool hasBorderRadiusOnContent = w->window()->decoration()
     && w->window()->decoration()->floatingTitlebar();
 
     // With a floating titlebar, effectiveShape becomes [titlebar rects][surface rects] so the two
@@ -621,7 +621,7 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
     RectF scaledClientRect;
     int titlebarVertexCount = 0;
 
-    if (hasFloatingTitlebar) {
+    if (hasBorderRadiusOnContent) {
         // Same transform as the blur shape: scale about the window origin, translate, move to w->pos().
         const auto contents = w->contentsRect(); // client area, relative to the frame (as in blurRegion())
         scaledClientRect = RectF{
@@ -856,7 +856,7 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
     QVector4D cornerRadiusUniform;
     if (isRounded) {
         RectF nativeBox;
-        if (hasFloatingTitlebar) {
+        if (hasBorderRadiusOnContent) {
             nativeBox = scaledClientRect;
         } else {
             const RectF transformedRect = RectF{
@@ -886,7 +886,7 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
         const QVector2D halfpixel(0.5 / read->colorAttachment()->width(),
                                   0.5 / read->colorAttachment()->height());
 
-        if (hasFloatingTitlebar && titlebarVertexCount > 0) {
+        if (hasBorderRadiusOnContent && titlebarVertexCount > 0) {
             ShaderManager::instance()->pushShader(m_onscreenPass.shader.get());
 
             m_onscreenPass.shader->setUniform(m_onscreenPass.mvpMatrixLocation, projectionMatrix);
